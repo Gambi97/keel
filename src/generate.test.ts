@@ -50,6 +50,7 @@ describe('generateProject', () => {
       'modules/app_stack/outputs.tf',
       '.github/workflows/terraform-plan.yml',
       '.github/workflows/terraform-apply.yml',
+      '.github/workflows/terraform-drift.yml',
       '.github/scripts/sync-database-url.sh',
     ]) {
       expect(written, expected).toContain(expected);
