@@ -1,7 +1,7 @@
 import { readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 
-export const STATE_FILE = '.create-serverless-app.json';
+export const STATE_FILE = '.keel.json';
 
 export type StepName =
   'generate' | 'scaleway-bucket' | 'infisical' | 'github-repo' | 'github-push' | 'github-config';

@@ -20,7 +20,7 @@ override.tf.json
 .env.*
 
 # Bootstrap resume file
-.create-serverless-app.json
+.keel.json
 
 # Editors / OS
 .DS_Store

@@ -15,16 +15,16 @@ import {
 } from './config.js';
 import { generateProject, GenerateError } from './generate.js';
 import { confirmSummary, fillMissing } from './prompts.js';
-import { isDone, loadState, markDone, stepData, type RunState } from './state.js';
+import { isDone, loadState, markDone, STATE_FILE, stepData, type RunState } from './state.js';
 import { cancel, intro, log, outro, renderNextSteps, renderSummary, withSpinner } from './ui.js';
 import { ensureStateBucket, validateScalewayCredentials } from './bootstrap/scaleway.js';
 import { bootstrapInfisical } from './bootstrap/infisical.js';
 import { configureRepo, createContext, ensureRepo, pushRepo } from './bootstrap/github.js';
 
-const HELP = `create-serverless-app: generate and bootstrap serverless infra on Scaleway
+const HELP = `keel: generate and bootstrap serverless infra on Scaleway
 
 Usage:
-  npx create-serverless-app [options]
+  npx keel-cli [options]
 
 Options:
   --name <name>                  Project name (dns-safe)
@@ -334,7 +334,7 @@ main().catch((error: unknown) => {
     log.error(error instanceof Error ? error.message : String(error));
     log.warn(
       'The run stopped before completing. Completed steps are recorded in ' +
-        '.create-serverless-app.json inside the project directory: re-run the same ' +
+        `${STATE_FILE} inside the project directory: re-run the same ` +
         'command to resume from where it failed. Already-created resources are reused, never duplicated.',
     );
   }

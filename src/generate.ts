@@ -12,6 +12,7 @@ import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 import type { Answers } from './config.js';
+import { STATE_FILE } from './state.js';
 
 export class GenerateError extends Error {}
 
@@ -72,7 +73,7 @@ export function generateProject(answers: Answers, options: GenerateOptions = {})
   const tokens = tokenMap(answers);
   const target = answers.targetDir;
 
-  if (existsSync(target) && readdirSync(target).some((f) => f !== '.create-serverless-app.json')) {
+  if (existsSync(target) && readdirSync(target).some((f) => f !== STATE_FILE)) {
     throw new GenerateError(
       `Directory "${target}" already exists and is not empty. ` +
         'Pick a different name with --dir or remove it first.',
@@ -126,8 +127,6 @@ function gitInit(target: string): void {
   }
   // Fall back to a tool identity when the user has no git identity configured.
   const hasIdentity = spawnSync('git', ['config', 'user.email'], { cwd: target }).status === 0;
-  const identity = hasIdentity
-    ? []
-    : ['-c', 'user.name=create-serverless-app', '-c', 'user.email=noreply@create-serverless-app'];
-  run(target, [...identity, 'commit', '-m', 'Initial infrastructure from create-serverless-app']);
+  const identity = hasIdentity ? [] : ['-c', 'user.name=keel', '-c', 'user.email=noreply@keel'];
+  run(target, [...identity, 'commit', '-m', 'Initial infrastructure from keel']);
 }
