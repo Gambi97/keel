@@ -80,7 +80,7 @@ export function pushRepo(ctx: GitHubContext, token: string, targetDir: string): 
   const remoteUrl = `https://github.com/${ctx.owner}/${ctx.repo}.git`;
   const askpassDir = mkdtempSync(join(tmpdir(), 'keel-askpass-'));
   const askpass = join(askpassDir, 'askpass.sh');
-  writeFileSync(askpass, '#!/bin/sh\necho "$CSA_GIT_TOKEN"\n');
+  writeFileSync(askpass, '#!/bin/sh\necho "$KEEL_GIT_TOKEN"\n');
   chmodSync(askpass, 0o700);
   try {
     const git = (args: string[]) =>
@@ -90,7 +90,7 @@ export function pushRepo(ctx: GitHubContext, token: string, targetDir: string): 
         env: {
           ...process.env,
           GIT_ASKPASS: askpass,
-          CSA_GIT_TOKEN: token,
+          KEEL_GIT_TOKEN: token,
           GIT_TERMINAL_PROMPT: '0',
         },
       });
