@@ -5,7 +5,7 @@ import type { Answers } from './config.js';
 export const log = p.log;
 
 export function intro(version: string): void {
-  p.intro(`create-serverless-app v${version}`);
+  p.intro(`keel v${version}`);
 }
 
 export function outro(message: string): void {

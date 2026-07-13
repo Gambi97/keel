@@ -1,11 +1,13 @@
 <div align="center">
 
-# create-serverless-app
+# keel
 
-### Spin up a production-shaped serverless stack with a single command.
+### The keel your product is built on: one command, from nothing to a running serverless backend.
 
-Start on the **near-free tier**, scale when your product does. No Terraform,
-no cloud CLI, no YAML to write. Just Node.
+A ship's keel is the first beam laid down, the backbone everything else is
+built onto. `keel` lays that foundation for your product: start on the
+**near-free tier**, scale when you do. No Terraform, no cloud CLI, no YAML to
+write. Just Node.
 
 <br />
 
@@ -18,7 +20,7 @@ no cloud CLI, no YAML to write. Just Node.
 <br />
 
 ```sh
-npx create-serverless-app
+npx keel-cli
 ```
 
 </div>
@@ -32,7 +34,7 @@ container runtime, a database, a state store, a CI/CD pipeline and a secret
 manager, then wiring credentials through all of them without leaking anything.
 It is a day of undifferentiated setup before you write a single line of product.
 
-**`create-serverless-app` collapses that into one command.** You answer a few
+**keel collapses that into one command.** You answer a few
 questions and get a Git repository that, on its first push, provisions a
 complete serverless backend on [Scaleway](https://www.scaleway.com):
 
@@ -59,7 +61,7 @@ local tooling or production credentials on their machine.
 
 ```mermaid
 flowchart TD
-    You([You: npx create-serverless-app]) -->|APIs, after you confirm| CLI{{CLI bootstrap}}
+    You([You: npx keel-cli]) -->|APIs, after you confirm| CLI{{CLI bootstrap}}
     CLI -->|creates state bucket| SCW[(Scaleway<br/>Object Storage)]
     CLI -->|creates repo, secrets,<br/>variables, branch rules| GH[GitHub repo]
     CLI -->|creates project, envs,<br/>placeholder secrets| INF[Infisical]
@@ -184,7 +186,7 @@ region, repository name and **visibility (public or private)**, and picks up
 `SCW_*` / `INFISICAL_*` / `GITHUB_TOKEN` from your environment as defaults:
 
 ```sh
-npx create-serverless-app
+npx keel-cli
 ```
 
 Before touching a single account, it shows a **full summary of what it will
@@ -198,13 +200,13 @@ export SCW_DEFAULT_PROJECT_ID=... SCW_DEFAULT_ORGANIZATION_ID=...
 export INFISICAL_CLIENT_ID=... INFISICAL_CLIENT_SECRET=...
 export GITHUB_TOKEN=...
 
-npx create-serverless-app --yes --name my-app --region fr-par --private
+npx keel-cli --yes --name my-app --region fr-par --private
 ```
 
 Preview everything without touching any account:
 
 ```sh
-npx create-serverless-app --dry-run --yes --name my-app
+npx keel-cli --dry-run --yes --name my-app
 ```
 
 ---
@@ -309,7 +311,7 @@ cents. Cost grows with real traffic, not with the number of environments.
 ## Failure recovery
 
 Every bootstrap step checks whether its resource already exists, and progress
-is recorded in `.create-serverless-app.json` inside the project directory. If a
+is recorded in `.keel.json` inside the project directory. If a
 run fails halfway, fix the cause and **re-run the same command**: completed
 steps are skipped, existing resources are reused, nothing is duplicated.
 

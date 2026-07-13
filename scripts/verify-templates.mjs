@@ -10,7 +10,7 @@ const { finalizeAnswers } = await import('../dist/config.js');
 const { generateProject } = await import('../dist/generate.js');
 
 const terraform = process.env.TERRAFORM_BIN ?? 'terraform';
-const dir = mkdtempSync(join(tmpdir(), 'csa-verify-'));
+const dir = mkdtempSync(join(tmpdir(), 'keel-verify-'));
 const target = join(dir, 'demo-app');
 
 try {

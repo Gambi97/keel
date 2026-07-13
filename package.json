@@ -1,8 +1,9 @@
 {
-  "name": "create-serverless-app",
+  "name": "keel-cli",
   "version": "0.1.0",
-  "description": "Generate and bootstrap a serverless infrastructure repo: Scaleway + Terraform + GitHub Actions + Infisical. Only Node required.",
+  "description": "keel: generate and bootstrap a serverless infrastructure repo on Scaleway (Terraform + GitHub Actions + Infisical). Only Node required.",
   "keywords": [
+    "keel",
     "scaleway",
     "terraform",
     "serverless",
@@ -14,11 +15,11 @@
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/Gambi97/create-serverless-app.git"
+    "url": "git+https://github.com/Gambi97/keel.git"
   },
   "type": "module",
   "bin": {
-    "create-serverless-app": "dist/index.js"
+    "keel": "dist/index.js"
   },
   "files": [
     "dist",

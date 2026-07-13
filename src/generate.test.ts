@@ -28,7 +28,7 @@ afterEach(() => {
 
 describe('generateProject', () => {
   it('renders the full repository without leftover tokens', () => {
-    dir = mkdtempSync(join(tmpdir(), 'csa-gen-'));
+    dir = mkdtempSync(join(tmpdir(), 'keel-gen-'));
     const target = join(dir, 'demo-app');
     const written = generateProject(sampleAnswers(target), { git: false });
 
@@ -83,7 +83,7 @@ describe('generateProject', () => {
   });
 
   it('creates an initial git commit on main', () => {
-    dir = mkdtempSync(join(tmpdir(), 'csa-git-'));
+    dir = mkdtempSync(join(tmpdir(), 'keel-git-'));
     const target = join(dir, 'demo-app');
     generateProject(sampleAnswers(target));
     const branch = execSync('git rev-parse --abbrev-ref HEAD', { cwd: target }).toString().trim();
@@ -93,7 +93,7 @@ describe('generateProject', () => {
   });
 
   it('refuses to overwrite a non-empty directory', () => {
-    dir = mkdtempSync(join(tmpdir(), 'csa-clash-'));
+    dir = mkdtempSync(join(tmpdir(), 'keel-clash-'));
     writeFileSync(join(dir, 'existing.txt'), 'hello');
     expect(() => generateProject(sampleAnswers(dir), { git: false })).toThrow(GenerateError);
   });
