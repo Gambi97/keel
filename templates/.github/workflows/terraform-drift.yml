@@ -1,0 +1,91 @@
+name: Drift detection
+
+# Runs a read-only plan on a schedule and opens (or updates) an issue when the
+# real infrastructure no longer matches the code, e.g. after a change made in
+# the Scaleway console.
+
+on:
+  schedule:
+    - cron: "0 6 * * 1" # every Monday, 06:00 UTC
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+  issues: write
+
+env:
+  # The Scaleway keys double as S3 credentials for the state backend, so the
+  # same secret feeds both variables: one credential, one place to rotate.
+  AWS_ACCESS_KEY_ID: ${{ secrets.SCW_ACCESS_KEY }}
+  AWS_SECRET_ACCESS_KEY: ${{ secrets.SCW_SECRET_KEY }}
+  SCW_ACCESS_KEY: ${{ secrets.SCW_ACCESS_KEY }}
+  SCW_SECRET_KEY: ${{ secrets.SCW_SECRET_KEY }}
+  SCW_DEFAULT_PROJECT_ID: ${{ secrets.SCW_DEFAULT_PROJECT_ID }}
+  SCW_DEFAULT_ORGANIZATION_ID: ${{ secrets.SCW_DEFAULT_ORGANIZATION_ID }}
+  TF_VAR_infisical_client_id: ${{ secrets.INFISICAL_CLIENT_ID }}
+  TF_VAR_infisical_client_secret: ${{ secrets.INFISICAL_CLIENT_SECRET }}
+  TF_VAR_infisical_project_id: ${{ vars.INFISICAL_PROJECT_ID }}
+  TF_VAR_infisical_host: ${{ vars.INFISICAL_HOST }}
+  TF_IN_AUTOMATION: "true"
+
+jobs:
+  drift:
+    name: drift (${{ matrix.environment }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        environment: [staging, prod]
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: "~1.12"
+          terraform_wrapper: false
+
+      - name: Write backend config
+        run: |
+          cat > backend.hcl <<EOF
+          bucket = "${{ vars.TF_STATE_BUCKET }}"
+          region = "${{ vars.SCW_REGION }}"
+          endpoints = {
+            s3 = "https://s3.${{ vars.SCW_REGION }}.scw.cloud"
+          }
+          EOF
+
+      - name: Terraform init
+        run: terraform init -input=false -backend-config=backend.hcl
+
+      - name: Select workspace
+        run: terraform workspace select -or-create ${{ matrix.environment }}
+
+      - name: Terraform plan (drift check)
+        id: plan
+        # -lock=false: read-only check, must never contend with a real apply.
+        run: |
+          set +e
+          terraform plan -input=false -lock=false -detailed-exitcode \
+            -var-file=${{ matrix.environment }}.tfvars -no-color > plan.txt 2>&1
+          code=$?
+          set -e
+          echo "exitcode=$code" >> "$GITHUB_OUTPUT"
+          tail -50 plan.txt
+          if [ "$code" = "1" ]; then exit 1; fi
+
+      - name: Report drift
+        if: steps.plan.outputs.exitcode == '2'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          ENVIRONMENT: ${{ matrix.environment }}
+        run: |
+          title="Infrastructure drift detected (${ENVIRONMENT})"
+          body="Scheduled \`terraform plan\` for **${ENVIRONMENT}** found differences between the code and the real infrastructure.
+
+          Review the [workflow run](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}) and either revert the manual change or align the code with a PR."
+          existing=$(gh issue list --state open --search "in:title \"$title\"" --json number --jq '.[0].number')
+          if [ -n "$existing" ]; then
+            gh issue comment "$existing" --body "Drift still present on $(date -u +%F). See ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+          else
+            gh issue create --title "$title" --body "$body"
+          fi

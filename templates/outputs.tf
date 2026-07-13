@@ -8,9 +8,9 @@ output "registry_endpoint" {
   value       = module.app_stack.registry_endpoint
 }
 
-output "database_endpoint" {
-  description = "Serverless SQL Database connection endpoint."
-  value       = module.app_stack.database_endpoint
+output "database_url" {
+  description = "Ready-to-use Postgres connection string (dedicated least-privilege IAM credential)."
+  value       = module.app_stack.database_url
   sensitive   = true
 }
 

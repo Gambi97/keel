@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
-# Pushes the freshly-applied database endpoint to Infisical as DATABASE_URL.
+# Pushes the ready-to-use database connection string (dedicated IAM
+# credential included) to Infisical as DATABASE_URL.
 # Usage: sync-database-url.sh <staging|prod>
 # Expects: INFISICAL_HOST, INFISICAL_CLIENT_ID, INFISICAL_CLIENT_SECRET,
 #          INFISICAL_PROJECT_ID in the environment; terraform init already run.
@@ -7,12 +8,12 @@ set -euo pipefail
 
 ENVIRONMENT="${1:?usage: sync-database-url.sh <staging|prod>}"
 
-DB_ENDPOINT="$(terraform output -raw database_endpoint)"
-if [ -z "$DB_ENDPOINT" ]; then
-  echo "No database endpoint in outputs, skipping Infisical sync."
+DB_URL="$(terraform output -raw database_url)"
+if [ -z "$DB_URL" ]; then
+  echo "No database_url in outputs, skipping Infisical sync."
   exit 0
 fi
-echo "::add-mask::$DB_ENDPOINT"
+echo "::add-mask::$DB_URL"
 
 ACCESS_TOKEN="$(curl -sS --fail-with-body -X POST \
   "$INFISICAL_HOST/api/v1/auth/universal-auth/login" \
@@ -24,7 +25,7 @@ echo "::add-mask::$ACCESS_TOKEN"
 payload="$(jq -n \
   --arg workspaceId "$INFISICAL_PROJECT_ID" \
   --arg environment "$ENVIRONMENT" \
-  --arg value "$DB_ENDPOINT" \
+  --arg value "$DB_URL" \
   '{workspaceId: $workspaceId, environment: $environment, secretPath: "/", secretValue: $value, type: "shared"}')"
 
 # Update the placeholder seeded at bootstrap; create the secret if missing.

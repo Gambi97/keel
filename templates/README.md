@@ -16,6 +16,7 @@ here.
 | Registry namespace | Private container registry for the app images |
 | Container namespace + Serverless Container | Runs the app, scales to zero when idle |
 | Serverless SQL Database (Postgres) | One independent database per environment |
+| IAM application + API key | Dedicated least-privilege database credential for the app |
 
 Two environments, **staging** and **prod**, isolated via Terraform
 workspaces: same code, two separate states, differences confined to
@@ -41,8 +42,15 @@ merge/push main   -> apply staging -> manual approval (production gate) -> apply
 
 - `main` is protected: PRs need a green plan, force pushes are blocked.
 - The prod apply waits for approval on the `production` GitHub Environment.
-- After each apply, the pipeline writes the real database endpoint to
-  Infisical as `DATABASE_URL` for that environment.
+- After each apply, the pipeline writes a ready-to-use Postgres connection
+  string to Infisical as `DATABASE_URL` for that environment. The credential
+  inside it is a dedicated IAM application that can only read/write the
+  database (least privilege), not your main API key.
+- State is locked during applies (S3-native locking, `use_lockfile`), so
+  concurrent runs cannot corrupt it.
+- A scheduled **drift detection** workflow (Monday 06:00 UTC, or manual via
+  the Actions tab) runs a read-only plan and opens an issue if the real
+  infrastructure diverged from the code.
 
 ## First deploy
 
@@ -70,7 +78,7 @@ merge/push main   -> apply staging -> manual approval (production gate) -> apply
 
    | Variable | Environment | Notes |
    |---|---|---|
-   | `DATABASE_URL` | staging + prod | Auto-updated by the pipeline after each apply |
+   | `DATABASE_URL` | staging + prod | Complete connection string, auto-updated by the pipeline after each apply. No action needed |
    | `BASIC_AUTH_USER` / `BASIC_AUTH_PASSWORD` | staging | The app must enforce these when `BASIC_AUTH_ENABLED=true` |
 
    Every secret in the Infisical environment is injected into the container
@@ -92,6 +100,9 @@ in any framework). Prod does not set `BASIC_AUTH_ENABLED`.
   are variables with sensible defaults you can override the same way.
 - **Rotate an app secret**: change it in Infisical, trigger an apply. No
   commit needed.
+- **Rotate the database credential**: `terraform apply
+  -replace=module.app_stack.scaleway_iam_api_key.db` (or via a PR touching
+  it); the pipeline re-syncs `DATABASE_URL` automatically.
 - **Rotate Scaleway/Infisical credentials**: update the GitHub Actions
   secrets (repo Settings > Secrets and variables > Actions).
 - **Add a custom domain**: add a `scaleway_container_domain` resource in
@@ -147,4 +158,7 @@ Avoid local applies: they race against CI on the same state.
   that the machine identity has access to the project and both environments.
 - **Apply green but no container**: expected until `container_image` is set.
 - **App can't reach the database**: `DATABASE_URL` is only synced after an
-  apply; check the value in Infisical for that environment.
+  apply; check the value in Infisical for that environment. It must contain
+  a username and password (the dedicated IAM credential), not placeholders.
+- **Apply fails creating IAM resources**: the CI Scaleway key needs IAM
+  permissions (IAMManager) to create the app's database credential.

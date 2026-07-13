@@ -4,9 +4,12 @@
 # Credentials come from AWS_ACCESS_KEY_ID / AWS_SECRET_ACCESS_KEY
 # (set them to your Scaleway access key / secret key).
 # Each workspace stores its state under env:/<workspace>/.
+# use_lockfile enables S3-native state locking (Terraform >= 1.10); Scaleway
+# Object Storage supports the conditional writes it relies on.
 terraform {
   backend "s3" {
     key                         = "terraform.tfstate"
+    use_lockfile                = true
     skip_credentials_validation = true
     skip_region_validation      = true
     skip_requesting_account_id  = true

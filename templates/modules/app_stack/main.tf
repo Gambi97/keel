@@ -20,6 +20,30 @@ resource "scaleway_sdb_sql_database" "this" {
   max_cpu = var.db_max_cpu
 }
 
+# Dedicated least-privilege credential for the application: it can reach the
+# database and nothing else. Serverless SQL authenticates with IAM: username
+# is the application ID, password its API secret key.
+resource "scaleway_iam_application" "db" {
+  name        = "${local.name}-db"
+  description = "Database access for ${local.name} (managed by Terraform)"
+}
+
+resource "scaleway_iam_policy" "db_access" {
+  name           = "${local.name}-db-access"
+  description    = "Read/write access to the ${local.name} Serverless SQL database"
+  application_id = scaleway_iam_application.db.id
+
+  rule {
+    project_ids          = [scaleway_sdb_sql_database.this.project_id]
+    permission_set_names = ["ServerlessSQLDatabaseReadWrite"]
+  }
+}
+
+resource "scaleway_iam_api_key" "db" {
+  application_id = scaleway_iam_application.db.id
+  description    = "Database credential for ${local.name} (managed by Terraform)"
+}
+
 # The container is gated on an image being available: registry and database
 # are provisioned first, the container appears once an image has been pushed
 # and container_image is set.
