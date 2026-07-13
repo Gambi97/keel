@@ -3,7 +3,7 @@
 </p>
 
 <p align="center">
-  One command from an empty account to production-ready serverless infrastructure.
+  One command from zero to a production-shaped serverless infrastructure on Scaleway<br>(Terraform + GitHub Actions + Infisical).
 </p>
 
 <p align="center">
@@ -43,11 +43,8 @@ You need Node >= 18.17, git, and credentials for Scaleway, Infisical and
 GitHub (see [Prerequisites](#prerequisites) for how to get each one).
 
 ```sh
-npx github:Gambi97/keel
+npx keel-cli
 ```
-
-> keel is not on npm yet: `npx` installs and builds it straight from this
-> repository. Nothing else to install.
 
 The CLI asks for a project name, region, repository name and visibility, picks
 up `SCW_*` / `INFISICAL_*` / `GITHUB_TOKEN` from your environment as defaults,
@@ -59,10 +56,10 @@ Non-interactive and dry-run:
 
 ```sh
 # scripts / CI: every question has a flag
-npx github:Gambi97/keel --yes --name my-app --region fr-par --private
+npx keel-cli --yes --name my-app --region fr-par --private
 
 # preview: generates the repo locally, touches no account
-npx github:Gambi97/keel --dry-run --yes --name my-app
+npx keel-cli --dry-run --yes --name my-app
 ```
 
 See the full [CLI reference](#cli-reference) for all flags, or pass
@@ -137,7 +134,7 @@ Actions encrypted secrets, because that is what CI needs to boot.
 
 ```mermaid
 flowchart TD
-    You([You: npx keel]) -->|APIs, after you confirm| CLI{{CLI bootstrap}}
+    You([You: npx keel-cli]) -->|APIs, after you confirm| CLI{{CLI bootstrap}}
     CLI -->|creates state bucket| SCW[(Scaleway<br/>Object Storage)]
     CLI -->|creates repo, secrets,<br/>variables, branch rules| GH[GitHub repo]
     CLI -->|creates project, envs,<br/>placeholder secrets| INF[Infisical]
@@ -386,6 +383,18 @@ npm run lint               # eslint
 npm run verify:templates   # render templates + terraform fmt/validate (needs terraform)
 node dist/index.js --dry-run --yes --name demo   # end-to-end without accounts
 ```
+
+### Releasing (maintainers)
+
+Publishing runs in CI, never from a laptop:
+
+```sh
+npm version minor        # bumps package.json, commits and tags vX.Y.Z
+git push --follow-tags   # the Release workflow publishes to npm with provenance
+```
+
+The workflow refuses a tag that does not match `package.json` and skips
+versions that are already on the registry, so re-running it is always safe.
 
 ## License
 
