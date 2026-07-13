@@ -300,11 +300,31 @@ files.
 
 ---
 
-## Costs
+## What it costs to start
 
-With scale-to-zero defaults and no traffic, the monthly cost is close to zero:
-Serverless Containers and Serverless SQL bill per usage, the state bucket is
-cents. Cost grows with real traffic, not with the number of environments.
+`keel` is tuned to sit **near the free tier** while you have little or no
+traffic. Compute scales to zero on both the container and the database, so an
+idle project (staging **and** prod) costs cents, not euros. A rough monthly
+picture for a minimal setup (Scaleway `fr-par` list prices, excl. VAT):
+
+| Component | Minimal setup | Monthly cost |
+|---|---|---|
+| Serverless Containers (both envs) | scale-to-zero, low traffic | **~€0** (200k vCPU-s + 400k GB-s free / month) |
+| Serverless SQL (both envs) | idle most of the time, ~1 GB each | **~€0.20** storage + a few cents of compute |
+| Object Storage (Terraform state) | a few MB | **~€0** |
+| Container Registry (private images) | 1-2 image versions | **~€0.05** (or €0 if the registry is public) |
+| **Total to start** | | **under ~€1 / month** |
+
+The key is that compute is billed per second, and only while it is actually
+serving: an idle container and a paused database drop to zero and you pay just
+a few cents of storage. Cost grows with **real usage**, not with the number of
+environments. Standing free allowances include 200,000 vCPU-seconds and
+400,000 GB-seconds of container time per month, 75 GB of egress, and public
+registry storage up to 75 GB.
+
+When traffic arrives, the same setup scales up smoothly: raise `min_scale` /
+`max_scale` in the tfvars and you move from "near free" to paying for the
+capacity you actually use, with no re-architecting.
 
 ---
 
