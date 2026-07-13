@@ -1,9 +1,9 @@
 <p align="center">
-  <img src="assets/logo.svg" alt="keel" width="440">
+  <img src="assets/logo.png" alt="keel" width="520">
 </p>
 
 <p align="center">
-  One command from an empty account to a production-shaped serverless backend.
+  One command from an empty account to the serverless infrastructure your backend runs on.
 </p>
 
 <p align="center">
@@ -21,11 +21,12 @@
 </p>
 
 A ship's keel is the first beam laid down, the backbone everything else is
-built onto. `keel` lays that foundation for your product: a complete
-serverless backend on [Scaleway](https://www.scaleway.com), provisioned by
-Terraform, deployed by GitHub Actions, with secrets in
-[Infisical](https://infisical.com). You answer a few questions, push to
-`main`, and it is running.
+built onto. `keel` lays that foundation for your product: the complete
+serverless infrastructure your backend runs on
+[Scaleway](https://www.scaleway.com), provisioned by Terraform, deployed by
+GitHub Actions, with secrets in [Infisical](https://infisical.com). It does
+not generate an app: you bring a Docker image, keel gives it a home. You
+answer a few questions, push to `main`, and the infrastructure is live.
 
 - **Near-free to start.** Compute and database scale to zero; an idle project
   costs cents per month, with no expiring trial.
@@ -93,10 +94,10 @@ to rewrite if you outgrow the stack.
 
 ### Why Scaleway, and not AWS or the others
 
-AWS can absolutely do this, but "serverless backend" on AWS means assembling
+AWS can absolutely do this, but the equivalent setup on AWS means assembling
 Lambda + API Gateway + Aurora + ECR + S3 + a thick layer of IAM, each with its
 own knobs. keel optimizes for a different thing: **the shortest path from
-nothing to a running, cheap, scalable backend.**
+nothing to running, cheap, scalable infrastructure.**
 
 - **Truly scale-to-zero, on both tiers.** Scaleway Serverless Containers
   *and* Serverless SQL drop to zero when idle. On AWS, a serverless database
