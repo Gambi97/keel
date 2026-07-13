@@ -119,13 +119,13 @@ export async function configureRepo(
   answers: Answers,
   infisicalProjectId: string,
 ): Promise<void> {
+  // The workflows map AWS_* (state backend) from the same SCW_* secrets, so
+  // each credential is stored once and rotated in one place.
   await setSecrets(ctx, {
     SCW_ACCESS_KEY: answers.scaleway.accessKey,
     SCW_SECRET_KEY: answers.scaleway.secretKey,
     SCW_DEFAULT_PROJECT_ID: answers.scaleway.projectId,
     SCW_DEFAULT_ORGANIZATION_ID: answers.scaleway.organizationId,
-    AWS_ACCESS_KEY_ID: answers.scaleway.accessKey,
-    AWS_SECRET_ACCESS_KEY: answers.scaleway.secretKey,
     INFISICAL_CLIENT_ID: answers.infisical.clientId,
     INFISICAL_CLIENT_SECRET: answers.infisical.clientSecret,
   });

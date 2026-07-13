@@ -8,9 +8,10 @@ permissions:
   contents: read
 
 env:
-  # Scaleway keys double as S3 credentials for the state backend.
-  AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
-  AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+  # The Scaleway keys double as S3 credentials for the state backend, so the
+  # same secret feeds both variables: one credential, one place to rotate.
+  AWS_ACCESS_KEY_ID: ${{ secrets.SCW_ACCESS_KEY }}
+  AWS_SECRET_ACCESS_KEY: ${{ secrets.SCW_SECRET_KEY }}
   SCW_ACCESS_KEY: ${{ secrets.SCW_ACCESS_KEY }}
   SCW_SECRET_KEY: ${{ secrets.SCW_SECRET_KEY }}
   SCW_DEFAULT_PROJECT_ID: ${{ secrets.SCW_DEFAULT_PROJECT_ID }}

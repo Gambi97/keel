@@ -1,6 +1,6 @@
-# Terraform
+# Terraform (.terraform.lock.hcl is intentionally NOT ignored: commit it
+# for reproducible provider versions)
 .terraform/
-.terraform.lock.hcl
 *.tfstate
 *.tfstate.*
 crash.log
