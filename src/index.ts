@@ -18,13 +18,19 @@ import { confirmSummary, fillMissing } from './prompts.js';
 import { isDone, loadState, markDone, STATE_FILE, stepData, type RunState } from './state.js';
 import { cancel, intro, log, outro, renderNextSteps, renderSummary, withSpinner } from './ui.js';
 import { ensureStateBucket, validateScalewayCredentials } from './bootstrap/scaleway.js';
-import { bootstrapInfisical } from './bootstrap/infisical.js';
-import { configureRepo, createContext, ensureRepo, pushRepo } from './bootstrap/github.js';
+import { bootstrapInfisical, login as infisicalLogin } from './bootstrap/infisical.js';
+import {
+  configureRepo,
+  createContext,
+  ensureRepo,
+  pushRepo,
+  type GitHubContext,
+} from './bootstrap/github.js';
 
 const HELP = `keel: generate and bootstrap serverless infra on Scaleway
 
 Usage:
-  npx keel-cli [options]
+  npx github:Gambi97/keel [options]
 
 Options:
   --name <name>                  Project name (dns-safe)
@@ -40,7 +46,7 @@ Options:
   --infisical-project-name <n>   Infisical project (default: project name)
   --github-token <token>         GitHub token, repo+workflow (env GITHUB_TOKEN)
   --repo-name <name>             GitHub repository name (default: project name)
-  --private                      Create the GitHub repository as private (default: public)
+  --private / --public           GitHub repository visibility (default: public)
   --no-basic-auth                Disable Basic Auth on staging
   --staging-min-scale <n>        Staging min instances (default 0)
   --staging-max-scale <n>        Staging max instances (default 1)
@@ -199,11 +205,17 @@ function printDryRunPlan(answers: Answers): void {
 async function runBootstrap(answers: Answers, state: RunState): Promise<string> {
   const dir = answers.targetDir;
 
+  // All three credentials are checked before anything is created anywhere,
+  // so a bad token cannot leave a half-bootstrapped account behind.
+  let ctx!: GitHubContext;
+  await withSpinner('Validating Scaleway, Infisical and GitHub credentials', async () => {
+    await validateScalewayCredentials(answers);
+    await infisicalLogin(answers);
+    ctx = await createContext(answers);
+  });
+
   if (!isDone(state, 'scaleway-bucket')) {
-    await withSpinner('Validating Scaleway credentials and creating state bucket', async () => {
-      await validateScalewayCredentials(answers);
-      await ensureStateBucket(answers);
-    });
+    await withSpinner('Creating Terraform state bucket', () => ensureStateBucket(answers));
     markDone(dir, state, 'scaleway-bucket');
   } else {
     log.info('Scaleway state bucket: already done, skipping.');
@@ -220,7 +232,6 @@ async function runBootstrap(answers: Answers, state: RunState): Promise<string> 
     log.info('Infisical project: already done, skipping.');
   }
 
-  const ctx = await createContext(answers);
   let repoUrl = stepData(state, 'github-repo', 'url');
   if (!repoUrl) {
     const repo = await withSpinner(`Creating GitHub repository ${ctx.owner}/${ctx.repo}`, () =>
