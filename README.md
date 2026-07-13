@@ -1,4 +1,6 @@
-<h1 align="center">keel</h1>
+<p align="center">
+  <img src="assets/logo.svg" alt="keel" width="440">
+</p>
 
 <p align="center">
   One command from an empty account to a production-shaped serverless backend.

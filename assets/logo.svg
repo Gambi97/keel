@@ -1,0 +1,39 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 630" role="img" aria-label="keel">
+  <title>keel</title>
+  <rect width="1200" height="630" fill="#080d24"/>
+
+  <!-- Keel bow: circuit traces rising from the hull -->
+  <g stroke="#ffffff" stroke-linecap="round" fill="none">
+    <!-- outer bow sides, nearly vertical with a slight flare into the hull -->
+    <path d="M 272 438 C 264 365 270 305 278 258" stroke-width="10"/>
+    <path d="M 388 438 C 396 365 390 305 382 258" stroke-width="10"/>
+    <!-- inner pair -->
+    <line x1="307" y1="442" x2="307" y2="222" stroke-width="9"/>
+    <line x1="353" y1="442" x2="353" y2="222" stroke-width="9"/>
+    <!-- central spine, running through to the tip -->
+    <line x1="330" y1="188" x2="330" y2="560" stroke-width="9"/>
+  </g>
+
+  <!-- circuit nodes -->
+  <g fill="#ffffff">
+    <circle cx="330" cy="172" r="11"/>
+    <circle cx="307" cy="206" r="9"/>
+    <circle cx="353" cy="206" r="9"/>
+    <circle cx="278" cy="243" r="9"/>
+    <circle cx="382" cy="243" r="9"/>
+  </g>
+
+  <!-- solid hull, split by the spine -->
+  <path fill="#ffffff" d="M 250 415
+           C 262 490 300 545 330 582
+           C 360 545 398 490 410 415
+           C 383 448 355 460 330 460
+           C 305 460 277 448 250 415 Z"/>
+  <line x1="330" y1="452" x2="330" y2="588" stroke="#080d24" stroke-width="8"/>
+  <line x1="330" y1="452" x2="330" y2="582" stroke="#ffffff" stroke-width="4" stroke-linecap="round"/>
+
+  <!-- wordmark -->
+  <text x="500" y="462" fill="#ffffff" font-size="250" letter-spacing="6"
+        font-family="'Century Gothic','Futura','Montserrat','Avenir Next','Trebuchet MS',sans-serif"
+        font-weight="400">keel</text>
+</svg>
