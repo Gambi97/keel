@@ -36,7 +36,7 @@ jobs:
 
       - uses: hashicorp/setup-terraform@v3
         with:
-          terraform_version: "~1.12"
+          terraform_version: '~1.12'
           terraform_wrapper: false
 
       - name: Validate generated Terraform
@@ -44,6 +44,6 @@ jobs:
 
       - name: Dry-run end-to-end
         run: |
-          mkdir -p /tmp/csa-dry && cd /tmp/csa-dry
+          mkdir -p /tmp/keel-dry && cd /tmp/keel-dry
           node $GITHUB_WORKSPACE/dist/index.js --dry-run --yes --name ci-demo
           test -f ci-demo/main.tf

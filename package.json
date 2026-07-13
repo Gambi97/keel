@@ -17,6 +17,10 @@
     "type": "git",
     "url": "git+https://github.com/Gambi97/keel.git"
   },
+  "homepage": "https://github.com/Gambi97/keel#readme",
+  "bugs": {
+    "url": "https://github.com/Gambi97/keel/issues"
+  },
   "type": "module",
   "bin": {
     "keel": "dist/index.js"
