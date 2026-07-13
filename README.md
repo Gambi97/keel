@@ -1,6 +1,6 @@
 <div align="center">
 
-# ⚡ create-serverless-app
+# create-serverless-app
 
 ### Spin up a production-shaped serverless stack with a single command.
 
@@ -25,7 +25,7 @@ npx create-serverless-app
 
 ---
 
-## 🎯 What this is for
+## What this is for
 
 Getting a real backend online usually means gluing together a cloud account, a
 container runtime, a database, a state store, a CI/CD pipeline and a secret
@@ -36,16 +36,16 @@ It is a day of undifferentiated setup before you write a single line of product.
 questions and get a Git repository that, on its first push, provisions a
 complete serverless backend on [Scaleway](https://www.scaleway.com):
 
-- 💰 **Near-free to start.** Compute and database both scale to zero. With no
+- **Near-free to start.** Compute and database both scale to zero. With no
   traffic, you pay cents (just the state bucket). No 12-month trial that
   expires, no idle instances quietly billing you.
-- 📈 **Scales with your product.** The same repo grows from a weekend project
+- **Scales with your product.** The same repo grows from a weekend project
   to production: bump the scaling numbers in a tfvars file, open a PR, merge.
   Terraform and two isolated environments (staging + prod) are there from day
   one.
-- 🔒 **Secure by construction.** No secret ever touches the repository.
+- **Secure by construction.** No secret ever touches the repository.
   Credentials live in encrypted CI storage and in a dedicated secret manager.
-- 🧩 **Infrastructure only, zero lock-in of your code.** Your app is just a
+- **Infrastructure only, zero lock-in of your code.** Your app is just a
   Docker image. No framework, no proprietary function format, nothing to
   rewrite if you ever move.
 
@@ -55,7 +55,7 @@ local tooling or production credentials on their machine.
 
 ---
 
-## 🗺️ How it works
+## How it works
 
 ```mermaid
 flowchart TD
@@ -73,7 +73,7 @@ the first merge to `main`.
 
 ---
 
-## 🧱 The stack, and why these choices
+## The stack, and why these choices
 
 | Layer | Service | Why this one |
 |---|---|---|
@@ -133,7 +133,7 @@ your *application* consumes lives in Infisical.
 
 ---
 
-## ✅ Prerequisites
+## Prerequisites
 
 You need three accounts and their credentials. Nothing else is installed
 locally: the CLI talks to each service through its API.
@@ -177,7 +177,7 @@ fail fast, with nothing half-created.
 
 ---
 
-## 🚀 Usage
+## Usage
 
 Interactive (recommended the first time). It asks for the project name,
 region, repository name and **visibility (public or private)**, and picks up
@@ -209,7 +209,7 @@ npx create-serverless-app --dry-run --yes --name my-app
 
 ---
 
-## 📦 What gets created, and when
+## What gets created, and when
 
 **Phase A, bootstrap (the CLI, via APIs, after your confirmation)**
 
@@ -233,7 +233,7 @@ Add one later with a single `scaleway_container_domain` resource.
 
 ---
 
-## 🗂️ The generated repository
+## The generated repository
 
 ```
 my-app/
@@ -265,7 +265,7 @@ files.
 
 ---
 
-## 🧭 After the bootstrap
+## After the bootstrap
 
 1. **Push to `main`** (or merge a PR): the pipeline provisions registry and
    databases. Approve the `production` gate when prompted.
@@ -283,7 +283,7 @@ files.
 
 ---
 
-## 🔐 Security model
+## Security model
 
 - **No secret ever lands in the repository**: not in Terraform, not in tfvars,
   not in workflows. `backend.hcl` and local state are git-ignored.
@@ -298,7 +298,7 @@ files.
 
 ---
 
-## 💸 Costs
+## Costs
 
 With scale-to-zero defaults and no traffic, the monthly cost is close to zero:
 Serverless Containers and Serverless SQL bill per usage, the state bucket is
@@ -306,7 +306,7 @@ cents. Cost grows with real traffic, not with the number of environments.
 
 ---
 
-## ♻️ Failure recovery
+## Failure recovery
 
 Every bootstrap step checks whether its resource already exists, and progress
 is recorded in `.create-serverless-app.json` inside the project directory. If a
@@ -315,7 +315,7 @@ steps are skipped, existing resources are reused, nothing is duplicated.
 
 ---
 
-## ❓ FAQ
+## FAQ
 
 **Do I need Terraform, `scw` or `gh` installed?**
 No. The CLI bootstraps via APIs; Terraform runs inside GitHub Actions.
@@ -340,7 +340,7 @@ job in each workflow.
 
 ---
 
-## 🛠️ CLI reference
+## CLI reference
 
 ```
 --name <name>                  Project name (dns-safe: lowercase, digits, hyphens)
@@ -368,7 +368,7 @@ job in each workflow.
 
 ---
 
-## 👩‍💻 Development
+## Development
 
 ```sh
 npm install
