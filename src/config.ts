@@ -39,6 +39,7 @@ export interface Answers {
   github: {
     token: string;
     repoName: string;
+    repoPrivate: boolean;
   };
   basicAuthStaging: boolean;
   scaling: ScalingConfig;
@@ -178,6 +179,7 @@ export function finalizeAnswers(partial: PartialAnswers): Answers {
     github: {
       token: requireString(partial.github.token, 'GitHub token'),
       repoName: validateProjectName(partial.github.repoName?.trim() || projectName),
+      repoPrivate: partial.github.repoPrivate ?? false,
     },
     basicAuthStaging: partial.basicAuthStaging ?? true,
     scaling: {

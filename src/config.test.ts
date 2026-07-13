@@ -111,6 +111,7 @@ describe('finalizeAnswers', () => {
     expect(answers.stateBucket).toBe('my-app-tfstate');
     expect(answers.targetDir).toBe('my-app');
     expect(answers.github.repoName).toBe('my-app');
+    expect(answers.github.repoPrivate).toBe(false);
     expect(answers.infisical.host).toBe('https://app.infisical.com');
     expect(answers.basicAuthStaging).toBe(true);
     expect(answers.scaling).toEqual({

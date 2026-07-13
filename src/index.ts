@@ -40,6 +40,7 @@ Options:
   --infisical-project-name <n>   Infisical project (default: project name)
   --github-token <token>         GitHub token, repo+workflow (env GITHUB_TOKEN)
   --repo-name <name>             GitHub repository name (default: project name)
+  --private                      Create the GitHub repository as private (default: public)
   --no-basic-auth                Disable Basic Auth on staging
   --staging-min-scale <n>        Staging min instances (default 0)
   --staging-max-scale <n>        Staging max instances (default 1)
@@ -75,6 +76,8 @@ function parseCli(argv: string[]): { partial: PartialAnswers; flags: Flags } {
       'infisical-project-name': { type: 'string' },
       'github-token': { type: 'string' },
       'repo-name': { type: 'string' },
+      private: { type: 'boolean' },
+      public: { type: 'boolean' },
       'basic-auth': { type: 'boolean' },
       'no-basic-auth': { type: 'boolean' },
       'staging-min-scale': { type: 'string' },
@@ -123,6 +126,7 @@ function parseCli(argv: string[]): { partial: PartialAnswers; flags: Flags } {
     github: {
       token: values['github-token'],
       repoName: values['repo-name'],
+      repoPrivate: values.private ? true : values.public ? false : undefined,
     },
     basicAuthStaging: values['no-basic-auth'] ? false : values['basic-auth'],
     scaling: {
