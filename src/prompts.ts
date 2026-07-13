@@ -97,9 +97,21 @@ export async function fillMissing(
   if (!out.github.repoName) {
     out.github.repoName = await ask(
       p.text({
-        message: 'GitHub repository name (created as public)',
+        message: 'GitHub repository name',
         initialValue: out.projectName,
         validate: validate(validateProjectName),
+      }),
+    );
+  }
+  if (out.github.repoPrivate === undefined) {
+    out.github.repoPrivate = await ask(
+      p.select({
+        message: 'Repository visibility',
+        initialValue: false,
+        options: [
+          { value: false, label: 'Public', hint: 'the infra contains no secrets' },
+          { value: true, label: 'Private' },
+        ],
       }),
     );
   }

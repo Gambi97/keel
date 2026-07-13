@@ -134,7 +134,7 @@ first `terraform apply`.
 |---|---|
 | Your machine | The generated repo: Terraform, workflows, README, initial git commit |
 | Scaleway | One Object Storage bucket for Terraform state (`<name>-tfstate`, versioned) |
-| GitHub | Public repository with the code pushed to `main`; encrypted Actions **secrets** (Scaleway + Infisical credentials); Actions **variables** (bucket, region, Infisical project); `staging` and `production` environments, the latter gated by manual approval; branch protection on `main` |
+| GitHub | Repository (public or private, your choice) with the code pushed to `main`; encrypted Actions **secrets** (Scaleway + Infisical credentials); Actions **variables** (bucket, region, Infisical project); `staging` and `production` environments, the latter gated by manual approval; branch protection on `main` |
 | Infisical | A project with `staging` and `prod` environments, seeded with `BASIC_AUTH_USER` / `BASIC_AUTH_PASSWORD` (staging, password randomly generated) and a `DATABASE_URL` placeholder per environment |
 
 **Phase B: first deploy (Terraform in GitHub Actions, on push to `main`)**
@@ -240,9 +240,10 @@ created, what was not, and how to proceed.
 No. The CLI bootstraps via APIs; Terraform runs inside GitHub Actions.
 
 **Can the repository be private?**
-It is created public by design (the infra contains no secrets). Flip it to
-private in the repo settings if you prefer; nothing in the pipeline depends
-on visibility.
+Yes. The CLI asks for the repository name and its visibility; the default is
+public (the infra contains no secrets), but you can choose private
+interactively or with `--private`. Nothing in the pipeline depends on
+visibility.
 
 **Why is the container not created on the first apply?**
 A Serverless Container needs an image, and no image exists yet. Registry and
@@ -279,6 +280,7 @@ secrets in Infisical are never overwritten.
 --infisical-project-name <n>   Infisical project (default: project name)
 --github-token <token>         or env GITHUB_TOKEN (scopes: repo, workflow)
 --repo-name <name>             GitHub repository name (default: project name)
+--private                      Create the repository as private (default: public)
 --no-basic-auth                Disable Basic Auth on staging
 --staging-min-scale <n>        Default 0        --staging-max-scale <n>   Default 1
 --prod-min-scale <n>           Default 0        --prod-max-scale <n>      Default 2
