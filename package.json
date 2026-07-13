@@ -1,0 +1,55 @@
+{
+  "name": "create-serverless-app",
+  "version": "0.1.0",
+  "description": "Generate and bootstrap a serverless infrastructure repo: Scaleway + Terraform + GitHub Actions + Infisical. Only Node required.",
+  "keywords": [
+    "scaleway",
+    "terraform",
+    "serverless",
+    "infisical",
+    "github-actions",
+    "scaffold",
+    "infrastructure"
+  ],
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Gambi97/create-serverless-app.git"
+  },
+  "type": "module",
+  "bin": {
+    "create-serverless-app": "dist/index.js"
+  },
+  "files": [
+    "dist",
+    "templates"
+  ],
+  "engines": {
+    "node": ">=18.17.0"
+  },
+  "scripts": {
+    "build": "tsc",
+    "typecheck": "tsc --noEmit",
+    "lint": "eslint src",
+    "format": "prettier --write .",
+    "format:check": "prettier --check .",
+    "test": "vitest run",
+    "verify:templates": "node scripts/verify-templates.mjs",
+    "prepublishOnly": "npm run build && npm run lint && npm run test"
+  },
+  "dependencies": {
+    "@aws-sdk/client-s3": "^3.600.0",
+    "@clack/prompts": "^0.11.0",
+    "@octokit/rest": "^21.0.0",
+    "libsodium-wrappers": "^0.7.13"
+  },
+  "devDependencies": {
+    "@types/libsodium-wrappers": "^0.7.14",
+    "@types/node": "^20.14.0",
+    "eslint": "^9.0.0",
+    "prettier": "^3.3.0",
+    "typescript": "^5.5.0",
+    "typescript-eslint": "^8.0.0",
+    "vitest": "^3.0.0"
+  }
+}

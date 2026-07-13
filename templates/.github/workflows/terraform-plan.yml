@@ -1,0 +1,62 @@
+name: Terraform plan
+
+on:
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+env:
+  # Scaleway keys double as S3 credentials for the state backend.
+  AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+  AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+  SCW_ACCESS_KEY: ${{ secrets.SCW_ACCESS_KEY }}
+  SCW_SECRET_KEY: ${{ secrets.SCW_SECRET_KEY }}
+  SCW_DEFAULT_PROJECT_ID: ${{ secrets.SCW_DEFAULT_PROJECT_ID }}
+  SCW_DEFAULT_ORGANIZATION_ID: ${{ secrets.SCW_DEFAULT_ORGANIZATION_ID }}
+  TF_VAR_infisical_client_id: ${{ secrets.INFISICAL_CLIENT_ID }}
+  TF_VAR_infisical_client_secret: ${{ secrets.INFISICAL_CLIENT_SECRET }}
+  TF_VAR_infisical_project_id: ${{ vars.INFISICAL_PROJECT_ID }}
+  TF_VAR_infisical_host: ${{ vars.INFISICAL_HOST }}
+  TF_IN_AUTOMATION: "true"
+
+jobs:
+  plan:
+    name: plan (${{ matrix.environment }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        environment: [staging, prod]
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: "~1.9"
+
+      - name: Terraform fmt
+        run: terraform fmt -check -recursive
+
+      - name: Write backend config
+        run: |
+          cat > backend.hcl <<EOF
+          bucket = "${{ vars.TF_STATE_BUCKET }}"
+          region = "${{ vars.SCW_REGION }}"
+          endpoints = {
+            s3 = "https://s3.${{ vars.SCW_REGION }}.scw.cloud"
+          }
+          EOF
+
+      - name: Terraform init
+        run: terraform init -input=false -backend-config=backend.hcl
+
+      - name: Select workspace
+        run: terraform workspace select -or-create ${{ matrix.environment }}
+
+      - name: Terraform validate
+        run: terraform validate
+
+      - name: Terraform plan
+        run: terraform plan -input=false -var-file=${{ matrix.environment }}.tfvars

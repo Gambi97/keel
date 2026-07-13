@@ -1,0 +1,9 @@
+# Copy to backend.hcl (git-ignored) for local terraform runs:
+#   cp backend.hcl.example backend.hcl
+#   terraform init -backend-config=backend.hcl
+bucket = "__TF_STATE_BUCKET__"
+region = "__REGION__"
+
+endpoints = {
+  s3 = "https://s3.__REGION__.scw.cloud"
+}
