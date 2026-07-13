@@ -1,0 +1,28 @@
+# Terraform
+.terraform/
+.terraform.lock.hcl
+*.tfstate
+*.tfstate.*
+crash.log
+crash.*.log
+*.tfplan
+
+# Local backend config (contains bucket coordinates, kept out of the repo)
+backend.hcl
+
+# Local overrides and secrets: never commit credentials
+*.auto.tfvars
+override.tf
+override.tf.json
+*_override.tf
+*_override.tf.json
+.env
+.env.*
+
+# Bootstrap resume file
+.create-serverless-app.json
+
+# Editors / OS
+.DS_Store
+.idea/
+.vscode/
