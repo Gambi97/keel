@@ -3,7 +3,7 @@
 </p>
 
 <p align="center">
-  One command from an empty account to the serverless infrastructure your backend runs on.
+  One command from an empty account to production-ready serverless infrastructure.
 </p>
 
 <p align="center">
@@ -21,12 +21,12 @@
 </p>
 
 A ship's keel is the first beam laid down, the backbone everything else is
-built onto. `keel` lays that foundation for your product: the complete
-serverless infrastructure your backend runs on
-[Scaleway](https://www.scaleway.com), provisioned by Terraform, deployed by
-GitHub Actions, with secrets in [Infisical](https://infisical.com). It does
-not generate an app: you bring a Docker image, keel gives it a home. You
-answer a few questions, push to `main`, and the infrastructure is live.
+built onto. `keel` lays that foundation for whatever you are building: a
+complete serverless infrastructure on [Scaleway](https://www.scaleway.com),
+provisioned by Terraform, deployed by GitHub Actions, with secrets in
+[Infisical](https://infisical.com). It does not generate an app: you bring a
+Docker image, keel gives it a place to run. You answer a few questions, push
+to `main`, and the infrastructure is live.
 
 - **Near-free to start.** Compute and database scale to zero; an idle project
   costs cents per month, with no expiring trial.
@@ -67,7 +67,7 @@ See the full [CLI reference](#cli-reference) for all flags, or pass
 
 ## Why keel
 
-Getting a real backend online means gluing together a cloud account, a
+Getting anything real online means gluing together a cloud account, a
 container runtime, a database, a state store, a CI/CD pipeline and a secret
 manager, then threading credentials through all of them without leaking
 anything. It is a day of undifferentiated setup before the first line of
