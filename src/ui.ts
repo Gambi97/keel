@@ -49,7 +49,7 @@ export function renderSummary(answers: Answers, dryRun: boolean): string {
     '',
     'GitHub',
     `  repository     ${answers.github.repoName} (${answers.github.repoPrivate ? 'private' : 'public'}, will be created + pushed)`,
-    `  secrets        SCW_*, AWS_*, INFISICAL_* (encrypted)`,
+    `  secrets        SCW_*, INFISICAL_* (encrypted)`,
     `  variables      TF_STATE_BUCKET, SCW_REGION, INFISICAL_PROJECT_ID, INFISICAL_HOST`,
     '',
     'Infisical',

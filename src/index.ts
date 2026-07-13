@@ -190,7 +190,7 @@ function printDryRunPlan(answers: Answers): void {
       `  - Scaleway: create Object Storage bucket "${answers.stateBucket}" (${answers.region})`,
       `  - Infisical: create/reuse project "${answers.infisical.projectName}", environments staging/prod,`,
       '    seed BASIC_AUTH_USER/BASIC_AUTH_PASSWORD (staging) and DATABASE_URL placeholders',
-      `  - GitHub: create public repo "${answers.github.repoName}", push, set 8 encrypted secrets,`,
+      `  - GitHub: create ${answers.github.repoPrivate ? 'private' : 'public'} repo "${answers.github.repoName}", push, set 6 encrypted secrets,`,
       '    4 variables, staging/production environments and main branch protection',
     ].join('\n'),
   );

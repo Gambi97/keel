@@ -27,6 +27,11 @@ Scaleway Object Storage.
 Credentials live in GitHub Actions encrypted secrets (CI) and in Infisical
 (application).
 
+> Naming heads-up: `backend.tf` configures the Terraform **state backend**,
+> the bucket where Terraform records what it has created. It has nothing to
+> do with your application's backend, which is just the Docker image you
+> deploy.
+
 ## How deploys work
 
 ```
@@ -93,6 +98,9 @@ in any framework). Prod does not set `BASIC_AUTH_ENABLED`.
   `modules/app_stack` pointing at the container, plus your DNS record.
 - **Add an environment**: add a workspace, an `<env>.tfvars`, an Infisical
   environment with the same slug, and mirror one job in each workflow.
+- **Pin provider versions**: after any local `terraform init`, commit the
+  generated `.terraform.lock.hcl` so CI resolves the exact same provider
+  builds on every run.
 
 ## Running Terraform locally (optional)
 
@@ -124,8 +132,8 @@ Avoid local applies: they race against CI on the same state.
   only (name, region, scaling, image).
 - **GitHub Actions secrets**: `SCW_ACCESS_KEY`, `SCW_SECRET_KEY`,
   `SCW_DEFAULT_PROJECT_ID`, `SCW_DEFAULT_ORGANIZATION_ID`,
-  `AWS_ACCESS_KEY_ID` / `AWS_SECRET_ACCESS_KEY` (same Scaleway keys, for the
-  state backend), `INFISICAL_CLIENT_ID`, `INFISICAL_CLIENT_SECRET`.
+  `INFISICAL_CLIENT_ID`, `INFISICAL_CLIENT_SECRET`. The workflows reuse the
+  Scaleway keys as `AWS_*` for the state backend.
 - **GitHub Actions variables**: `TF_STATE_BUCKET`, `SCW_REGION`,
   `INFISICAL_PROJECT_ID`, `INFISICAL_HOST`.
 - **Infisical**: one environment per workspace (`staging`, `prod`), all
@@ -133,7 +141,7 @@ Avoid local applies: they race against CI on the same state.
 
 ## Troubleshooting
 
-- **Plan fails with 403 on the state bucket**: the `AWS_*` secrets don't
+- **Plan fails with 403 on the state bucket**: the `SCW_*` secrets don't
   match a Scaleway key with Object Storage access.
 - **Plan fails reading Infisical secrets**: check `INFISICAL_PROJECT_ID` and
   that the machine identity has access to the project and both environments.

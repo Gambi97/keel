@@ -36,7 +36,8 @@
     "format:check": "prettier --check .",
     "test": "vitest run",
     "verify:templates": "node scripts/verify-templates.mjs",
-    "prepublishOnly": "npm run build && npm run lint && npm run test"
+    "prepare": "npm run build",
+    "prepublishOnly": "npm run lint && npm run test"
   },
   "dependencies": {
     "@aws-sdk/client-s3": "^3.600.0",
