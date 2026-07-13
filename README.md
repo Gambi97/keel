@@ -8,7 +8,7 @@
 
 <p align="center">
   <a href="https://github.com/Gambi97/keel/actions/workflows/ci.yml"><img src="https://github.com/Gambi97/keel/actions/workflows/ci.yml/badge.svg" alt="CI status"></a>
-  <img src="https://img.shields.io/badge/node-%3E%3D18-339933?logo=node.js&logoColor=white" alt="node compatibility">
+  <img src="https://img.shields.io/badge/node-%3E%3D18.17-339933?logo=node.js&logoColor=white" alt="node compatibility">
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-blue" alt="MIT license"></a>
 </p>
 
@@ -39,12 +39,15 @@ to `main`, and the infrastructure is live.
 
 ## Quickstart
 
-You need Node >= 18, git, and credentials for Scaleway, Infisical and GitHub
-(see [Prerequisites](#prerequisites)).
+You need Node >= 18.17, git, and credentials for Scaleway, Infisical and
+GitHub (see [Prerequisites](#prerequisites) for how to get each one).
 
 ```sh
-npx keel-cli
+npx github:Gambi97/keel
 ```
+
+> keel is not on npm yet: `npx` installs and builds it straight from this
+> repository. Nothing else to install.
 
 The CLI asks for a project name, region, repository name and visibility, picks
 up `SCW_*` / `INFISICAL_*` / `GITHUB_TOKEN` from your environment as defaults,
@@ -56,10 +59,10 @@ Non-interactive and dry-run:
 
 ```sh
 # scripts / CI: every question has a flag
-npx keel-cli --yes --name my-app --region fr-par --private
+npx github:Gambi97/keel --yes --name my-app --region fr-par --private
 
 # preview: generates the repo locally, touches no account
-npx keel-cli --dry-run --yes --name my-app
+npx github:Gambi97/keel --dry-run --yes --name my-app
 ```
 
 See the full [CLI reference](#cli-reference) for all flags, or pass
@@ -100,7 +103,7 @@ own knobs. keel optimizes for a different thing: **the shortest path from
 nothing to running, cheap, scalable infrastructure.**
 
 - **Truly scale-to-zero, on both tiers.** Scaleway Serverless Containers
-  *and* Serverless SQL drop to zero when idle. On AWS, a serverless database
+  _and_ Serverless SQL drop to zero when idle. On AWS, a serverless database
   typically keeps minimum billable capacity running; for a project that is
   quiet most of the time, that difference is the whole point.
 - **No free tier clock.** Pricing starts near zero and stays per-second;
@@ -134,7 +137,7 @@ Actions encrypted secrets, because that is what CI needs to boot.
 
 ```mermaid
 flowchart TD
-    You([You: npx keel-cli]) -->|APIs, after you confirm| CLI{{CLI bootstrap}}
+    You([You: npx keel]) -->|APIs, after you confirm| CLI{{CLI bootstrap}}
     CLI -->|creates state bucket| SCW[(Scaleway<br/>Object Storage)]
     CLI -->|creates repo, secrets,<br/>variables, branch rules| GH[GitHub repo]
     CLI -->|creates project, envs,<br/>placeholder secrets| INF[Infisical]
@@ -151,21 +154,21 @@ local tooling or production credentials.
 
 **Phase A: bootstrap (the CLI, via APIs, after your confirmation)**
 
-| Where        | What                                                                                                                                                                                                                                              |
-| ------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Your machine | The generated repo: Terraform, workflows, README, initial git commit                                                                                                                                                                              |
-| Scaleway     | One Object Storage bucket for Terraform state (versioned, with native state locking)                                                                                                                                                              |
-| GitHub       | Repository (public or private) pushed to `main`; encrypted Actions secrets; Actions variables; `staging` and `production` environments, the latter gated by manual approval; branch protection on `main`                                          |
-| Infisical    | A project with `staging` and `prod` environments, seeded with `BASIC_AUTH_USER` / `BASIC_AUTH_PASSWORD` (staging, random password) and a `DATABASE_URL` placeholder per environment                                                               |
+| Where        | What                                                                                                                                                                                                     |
+| ------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Your machine | The generated repo: Terraform, workflows, README, initial git commit                                                                                                                                     |
+| Scaleway     | One Object Storage bucket for Terraform state (versioned, with native state locking)                                                                                                                     |
+| GitHub       | Repository (public or private) pushed to `main`; encrypted Actions secrets; Actions variables; `staging` and `production` environments, the latter gated by manual approval; branch protection on `main` |
+| Infisical    | A project with `staging` and `prod` environments, seeded with `BASIC_AUTH_USER` / `BASIC_AUTH_PASSWORD` (staging, random password) and a `DATABASE_URL` placeholder per environment                      |
 
 **Phase B: first deploy (Terraform in GitHub Actions, on push to `main`)**
 
-| Scaleway resource                           | Notes                                                                                                                      |
-| ------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------- |
-| Registry namespace                          | Private, one per environment                                                                                               |
-| Container namespace + Serverless Container  | The container appears once you set `container_image` in the tfvars; registry and database are created right away           |
-| Serverless SQL Database                     | One per environment; after each apply the pipeline writes a ready-to-use connection string to Infisical as `DATABASE_URL`  |
-| IAM application + API key                   | Dedicated credential that can only read/write the database (least privilege), embedded in `DATABASE_URL`                   |
+| Scaleway resource                          | Notes                                                                                                                     |
+| ------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------- |
+| Registry namespace                         | Private, one per environment                                                                                              |
+| Container namespace + Serverless Container | The container appears once you set `container_image` in the tfvars; registry and database are created right away          |
+| Serverless SQL Database                    | One per environment; after each apply the pipeline writes a ready-to-use connection string to Infisical as `DATABASE_URL` |
+| IAM application + API key                  | Dedicated credential that can only read/write the database (least privilege), embedded in `DATABASE_URL`                  |
 
 No custom domain is configured: the app gets an auto-generated Scaleway URL.
 Add one later with a single `scaleway_container_domain` resource.
@@ -190,22 +193,27 @@ Environments are separated with **Terraform workspaces**: same code, two
 independent states in one bucket, differences confined to the two `.tfvars`
 files.
 
-| Data                              | Lives in                 | Why                                                                    |
-| --------------------------------- | ------------------------ | ----------------------------------------------------------------------- |
-| Scaleway API keys                 | GitHub encrypted secrets | CI needs them to run Terraform                                         |
-| Infisical machine identity        | GitHub encrypted secrets | Lets Terraform read app secrets at plan/apply                          |
-| Basic Auth user/password          | Infisical (staging)      | App secret, injected into the container, rotatable                     |
-| Database connection string        | Infisical (both envs)    | Complete, ready-to-use value synced by the pipeline after each apply   |
-| Bucket, region, Infisical project | GitHub variables         | Non-sensitive wiring, editable in one place                            |
-| Project name, scaling, image      | Committed tfvars         | Reviewable configuration, no secrets                                   |
+| Data                              | Lives in                 | Why                                                                  |
+| --------------------------------- | ------------------------ | -------------------------------------------------------------------- |
+| Scaleway API keys                 | GitHub encrypted secrets | CI needs them to run Terraform                                       |
+| Infisical machine identity        | GitHub encrypted secrets | Lets Terraform read app secrets at plan/apply                        |
+| Basic Auth user/password          | Infisical (staging)      | App secret, injected into the container, rotatable                   |
+| Database connection string        | Infisical (both envs)    | Complete, ready-to-use value synced by the pipeline after each apply |
+| Bucket, region, Infisical project | GitHub variables         | Non-sensitive wiring, editable in one place                          |
+| Project name, scaling, image      | Committed tfvars         | Reviewable configuration, no secrets                                 |
 
 ## After the bootstrap
+
+The generated repository ships its own README: the full operating manual for
+day-2 work (scaling, rotating secrets, custom domains, troubleshooting). The
+short version of the first deploy:
 
 1. **Push to `main`** (or merge a PR): the pipeline provisions registry and
    databases. Approve the `production` gate when prompted.
 2. **Build and push your app image** to the registry endpoint from the apply
    output:
    ```sh
+   docker login rg.fr-par.scw.cloud/my-app-staging -u nologin --password-stdin <<< "$SCW_SECRET_KEY"
    docker build -t rg.fr-par.scw.cloud/my-app-staging/app:latest .
    docker push rg.fr-par.scw.cloud/my-app-staging/app:latest
    ```
@@ -234,6 +242,7 @@ creating anything**.
    `ContainersFullAccess`, `ServerlessSQLDatabaseFullAccess`,
    `ContainerRegistryFullAccess`, plus `IAMManager` so Terraform can create
    the app's dedicated least-privilege database credential).
+
 </details>
 
 <details>
@@ -245,6 +254,7 @@ creating anything**.
 2. Create a **Machine Identity** with **Universal Auth**: you need its
    **client ID** and **client secret**.
 3. Give the identity permission to create and manage projects.
+
 </details>
 
 <details>
@@ -255,6 +265,7 @@ creating anything**.
    with the `repo` and `workflow` scopes (classic), or a fine-grained token
    allowed to create repos and manage Actions secrets, variables,
    environments and branch protection.
+
 </details>
 
 ## Security model
@@ -282,13 +293,13 @@ keel is tuned to sit **near the free tier** while you have little or no
 traffic. A rough monthly picture for a minimal setup, staging and prod
 included (Scaleway `fr-par` list prices, excl. VAT):
 
-| Component                         | Minimal setup              | Monthly cost                                       |
-| --------------------------------- | -------------------------- | --------------------------------------------------- |
-| Serverless Containers (both envs) | scale-to-zero, low traffic | ~€0 (200k vCPU-s + 400k GB-s free / month)         |
-| Serverless SQL (both envs)        | idle most of the time      | ~€0.20 storage + a few cents of compute            |
-| Object Storage (Terraform state)  | a few MB                   | ~€0                                                |
-| Container Registry                | 1-2 image versions         | ~€0.05 (€0 if the registry is public)              |
-| **Total to start**                |                            | **under ~€1 / month**                              |
+| Component                         | Minimal setup              | Monthly cost                               |
+| --------------------------------- | -------------------------- | ------------------------------------------ |
+| Serverless Containers (both envs) | scale-to-zero, low traffic | ~€0 (200k vCPU-s + 400k GB-s free / month) |
+| Serverless SQL (both envs)        | idle most of the time      | ~€0.20 storage + a few cents of compute    |
+| Object Storage (Terraform state)  | a few MB                   | ~€0                                        |
+| Container Registry                | 1-2 image versions         | ~€0.05 (€0 if the registry is public)      |
+| **Total to start**                |                            | **under ~€1 / month**                      |
 
 Compute is billed per second, only while actually serving: an idle container
 and a paused database drop to zero and you pay a few cents of storage. Cost
@@ -341,9 +352,9 @@ one job in each workflow.
 --infisical-client-id <id>     or env INFISICAL_CLIENT_ID
 --infisical-client-secret <s>  or env INFISICAL_CLIENT_SECRET
 --infisical-project-name <n>   Infisical project (default: project name)
---github-token <token>         or env GITHUB_TOKEN (scopes: repo, workflow)
+--github-token <token>         or env GITHUB_TOKEN / GH_TOKEN (scopes: repo, workflow)
 --repo-name <name>             GitHub repository name (default: project name)
---private                      Create the repository as private (default: public)
+--private / --public           Repository visibility (default: public)
 --no-basic-auth                Disable Basic Auth on staging
 --staging-min-scale <n>        Default 0        --staging-max-scale <n>   Default 1
 --prod-min-scale <n>           Default 0        --prod-max-scale <n>      Default 2
@@ -351,6 +362,18 @@ one job in each workflow.
 --advanced                     Also ask scaling questions interactively
 --yes                          Accept defaults, skip the confirmation prompt
 --dry-run                      Generate locally, touch no account
+```
+
+A `--config` file uses the same nested shape as the flags; anything missing
+is taken from the environment or asked interactively:
+
+```json
+{
+  "projectName": "my-app",
+  "region": "fr-par",
+  "github": { "repoPrivate": true },
+  "scaling": { "prodMaxScale": 4 }
+}
 ```
 
 ## Development
