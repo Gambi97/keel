@@ -1,0 +1,21 @@
+# Socket.dev configuration (https://docs.socket.dev/docs/socket-yml)
+#
+# The alerts disabled below flag capabilities keel legitimately needs; none of
+# them is a vulnerability. Rationale per rule:
+#
+# - networkAccess: the CLI's whole job is talking to the Scaleway, GitHub and
+#   Infisical APIs (@aws-sdk/client-s3, @octokit/rest, fetch).
+# - shellAccess: keel shells out to `git` to init, commit and push the
+#   generated repository.
+# - obfuscatedFile: libsodium-wrappers ships libsodium as a packed/minified
+#   WASM/asm.js build; it is required to client-side encrypt GitHub Actions
+#   secrets (libsodium sealed box).
+# - urlStrings: API base URLs inside the SDKs and our bootstrap code.
+
+version: 2
+
+issueRules:
+  networkAccess: false
+  shellAccess: false
+  obfuscatedFile: false
+  urlStrings: false
