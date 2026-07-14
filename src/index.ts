@@ -10,6 +10,7 @@ import {
   fromEnv,
   mergeAnswers,
   missingRequired,
+  parseEnvironments,
   type Answers,
   type PartialAnswers,
 } from './config.js';
@@ -47,7 +48,13 @@ Options:
   --github-token <token>         GitHub token, repo+workflow (env GITHUB_TOKEN)
   --repo-name <name>             GitHub repository name (default: project name)
   --private / --public           GitHub repository visibility (default: public)
-  --no-basic-auth                Disable Basic Auth on staging
+  --environments <preset>        prod | staging+prod | dev+staging+prod
+                                 (or a list like "dev,staging,prod"; default staging+prod)
+  --no-basic-auth                Disable Basic Auth on non-production environments
+  --object-storage               Provision a per-environment Object Storage bucket
+  --no-object-storage            Do not provision Object Storage (default)
+  --dev-min-scale <n>            Dev min instances (default 0)
+  --dev-max-scale <n>            Dev max instances (default 1)
   --staging-min-scale <n>        Staging min instances (default 0)
   --staging-max-scale <n>        Staging max instances (default 1)
   --prod-min-scale <n>           Prod min instances (default 0)
@@ -84,8 +91,13 @@ function parseCli(argv: string[]): { partial: PartialAnswers; flags: Flags } {
       'repo-name': { type: 'string' },
       private: { type: 'boolean' },
       public: { type: 'boolean' },
+      environments: { type: 'string' },
       'basic-auth': { type: 'boolean' },
       'no-basic-auth': { type: 'boolean' },
+      'object-storage': { type: 'boolean' },
+      'no-object-storage': { type: 'boolean' },
+      'dev-min-scale': { type: 'string' },
+      'dev-max-scale': { type: 'string' },
       'staging-min-scale': { type: 'string' },
       'staging-max-scale': { type: 'string' },
       'prod-min-scale': { type: 'string' },
@@ -134,12 +146,16 @@ function parseCli(argv: string[]): { partial: PartialAnswers; flags: Flags } {
       repoName: values['repo-name'],
       repoPrivate: values.private ? true : values.public ? false : undefined,
     },
-    basicAuthStaging: values['no-basic-auth'] ? false : values['basic-auth'],
+    environments: values.environments ? parseEnvironments(values.environments) : undefined,
+    basicAuth: values['no-basic-auth'] ? false : values['basic-auth'],
+    objectStorage: values['no-object-storage'] ? false : values['object-storage'],
     scaling: {
-      stagingMinScale: num(values['staging-min-scale']),
-      stagingMaxScale: num(values['staging-max-scale']),
-      prodMinScale: num(values['prod-min-scale']),
-      prodMaxScale: num(values['prod-max-scale']),
+      dev: { minScale: num(values['dev-min-scale']), maxScale: num(values['dev-max-scale']) },
+      staging: {
+        minScale: num(values['staging-min-scale']),
+        maxScale: num(values['staging-max-scale']),
+      },
+      prod: { minScale: num(values['prod-min-scale']), maxScale: num(values['prod-max-scale']) },
     },
   };
 
@@ -156,11 +172,20 @@ function parseCli(argv: string[]): { partial: PartialAnswers; flags: Flags } {
 /** Config files use the same nested shape as PartialAnswers. */
 function normalizeConfigFile(raw: unknown): PartialAnswers {
   const obj = (raw ?? {}) as Record<string, unknown>;
+  let environments: string[] | undefined;
+  if (typeof obj.environments === 'string') {
+    environments = parseEnvironments(obj.environments);
+  } else if (Array.isArray(obj.environments)) {
+    environments = obj.environments as string[];
+  }
   return mergeAnswers({
     projectName: obj.projectName as string | undefined,
     region: obj.region as string | undefined,
     targetDir: obj.targetDir as string | undefined,
-    basicAuthStaging: obj.basicAuthStaging as boolean | undefined,
+    // `basicAuthStaging` is accepted as a legacy alias for `basicAuth`.
+    basicAuth: (obj.basicAuth ?? obj.basicAuthStaging) as boolean | undefined,
+    objectStorage: obj.objectStorage as boolean | undefined,
+    environments,
     scaleway: (obj.scaleway ?? {}) as PartialAnswers['scaleway'],
     infisical: (obj.infisical ?? {}) as PartialAnswers['infisical'],
     github: (obj.github ?? {}) as PartialAnswers['github'],
@@ -190,14 +215,17 @@ function checkEnvironment(): void {
 }
 
 function printDryRunPlan(answers: Answers): void {
+  const envList = answers.environments.map((e) => e.slug).join(', ');
+  const ghEnvs = answers.environments.map((e) => e.githubEnvironment).join('/');
   log.info(
     [
       'Dry run: generated the repository locally. A real run would additionally:',
-      `  - Scaleway: create Object Storage bucket "${answers.stateBucket}" (${answers.region})`,
-      `  - Infisical: create/reuse project "${answers.infisical.projectName}", environments staging/prod,`,
-      '    seed BASIC_AUTH_USER/BASIC_AUTH_PASSWORD (staging) and DATABASE_URL placeholders',
+      `  - Scaleway: create the Terraform state bucket "${answers.stateBucket}" (${answers.region})`,
+      `  - Infisical: create/reuse project "${answers.infisical.projectName}", environments ${envList},`,
+      '    seed BASIC_AUTH_USER/BASIC_AUTH_PASSWORD (non-prod) and DATABASE_URL placeholders' +
+        (answers.objectStorage ? ' and S3_* placeholders' : ''),
       `  - GitHub: create ${answers.github.repoPrivate ? 'private' : 'public'} repo "${answers.github.repoName}", push, set 6 encrypted secrets,`,
-      '    4 variables, staging/production environments and main branch protection',
+      `    4 variables, ${ghEnvs} environments and main branch protection`,
     ].join('\n'),
   );
 }
@@ -333,7 +361,7 @@ async function main(): Promise<void> {
     renderNextSteps(
       answers,
       repoUrl,
-      `rg.${answers.region}.scw.cloud/${answers.projectName}-staging`,
+      `rg.${answers.region}.scw.cloud/${answers.projectName}-${answers.environments[0]!.slug}`,
     ),
   );
 }

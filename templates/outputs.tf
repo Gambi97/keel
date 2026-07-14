@@ -18,3 +18,25 @@ output "container_namespace_id" {
   description = "Scaleway Containers namespace ID."
   value       = module.app_stack.container_namespace_id
 }
+
+output "object_bucket_name" {
+  description = "Object Storage bucket for application files (null unless enabled)."
+  value       = module.app_stack.object_bucket_name
+}
+
+# The complete set of secrets the pipeline pushes to Infisical after each apply:
+# always DATABASE_URL, plus the S3_* coordinates when Object Storage is enabled.
+output "infisical_secrets" {
+  description = "Secrets synced to Infisical after each apply."
+  sensitive   = true
+  value = merge(
+    { DATABASE_URL = module.app_stack.database_url },
+    var.enable_object_storage ? {
+      S3_BUCKET     = module.app_stack.object_bucket_name
+      S3_ENDPOINT   = module.app_stack.object_bucket_endpoint
+      S3_REGION     = var.region
+      S3_ACCESS_KEY = module.app_stack.object_storage_access_key
+      S3_SECRET_KEY = module.app_stack.object_storage_secret_key
+    } : {}
+  )
+}

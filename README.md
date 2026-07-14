@@ -30,8 +30,9 @@ to `main`, and the infrastructure is live.
 
 - **Near-free to start.** Compute and database scale to zero; an idle project
   costs cents per month, with no expiring trial.
-- **Scales with your product.** Staging and prod from day one; growing is a
-  one-line tfvars change reviewed in a PR.
+- **Scales with your product.** Pick your environments (production only, or
+  add staging and dev) and, if you need it, an application file store; growing
+  is a one-line tfvars change reviewed in a PR.
 - **Nothing to install.** No Terraform, no cloud CLI. Node and git, done.
 - **No secrets in the repo, ever.** Encrypted CI secrets and a dedicated
   secret manager, wired for you.
@@ -151,21 +152,22 @@ local tooling or production credentials.
 
 **Phase A: bootstrap (the CLI, via APIs, after your confirmation)**
 
-| Where        | What                                                                                                                                                                                                     |
-| ------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Your machine | The generated repo: Terraform, workflows, README, initial git commit                                                                                                                                     |
-| Scaleway     | One Object Storage bucket for Terraform state (versioned, with native state locking)                                                                                                                     |
-| GitHub       | Repository (public or private) pushed to `main`; encrypted Actions secrets; Actions variables; `staging` and `production` environments, the latter gated by manual approval; branch protection on `main` |
-| Infisical    | A project with `staging` and `prod` environments, seeded with `BASIC_AUTH_USER` / `BASIC_AUTH_PASSWORD` (staging, random password) and a `DATABASE_URL` placeholder per environment                      |
+| Where        | What                                                                                                                                                                                                                                                   |
+| ------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| Your machine | The generated repo: Terraform, workflows, README, initial git commit                                                                                                                                                                                   |
+| Scaleway     | One Object Storage bucket for Terraform state (versioned, with native state locking)                                                                                                                                                                   |
+| GitHub       | Repository (public or private) pushed to `main`; encrypted Actions secrets; Actions variables; one deployment environment per selected environment (`production` gated by manual approval); branch protection on `main`                                |
+| Infisical    | A project with one environment per selected environment, seeded with `BASIC_AUTH_USER` / `BASIC_AUTH_PASSWORD` (non-production, random password), a `DATABASE_URL` placeholder per environment, and `S3_*` placeholders when Object Storage is enabled |
 
 **Phase B: first deploy (Terraform in GitHub Actions, on push to `main`)**
 
-| Scaleway resource                          | Notes                                                                                                                     |
-| ------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------- |
-| Registry namespace                         | Private, one per environment                                                                                              |
-| Container namespace + Serverless Container | The container appears once you set `container_image` in the tfvars; registry and database are created right away          |
-| Serverless SQL Database                    | One per environment; after each apply the pipeline writes a ready-to-use connection string to Infisical as `DATABASE_URL` |
-| IAM application + API key                  | Dedicated credential that can only read/write the database (least privilege), embedded in `DATABASE_URL`                  |
+| Scaleway resource                           | Notes                                                                                                                                           |
+| ------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------- |
+| Registry namespace                          | Private, one per environment                                                                                                                    |
+| Container namespace + Serverless Container  | The container appears once you set `container_image` in the tfvars; registry and database are created right away                                |
+| Serverless SQL Database                     | One per environment; after each apply the pipeline writes a ready-to-use connection string to Infisical as `DATABASE_URL`                       |
+| IAM application + API key                   | Dedicated credential that can only read/write the database (least privilege), embedded in `DATABASE_URL`                                        |
+| Object Storage bucket + credential (opt-in) | Only with `--object-storage`: one bucket per environment plus a dedicated least-privilege credential; coordinates synced to Infisical as `S3_*` |
 
 No custom domain is configured: the app gets an auto-generated Scaleway URL.
 Add one later with a single `scaleway_container_domain` resource.
@@ -176,28 +178,29 @@ Add one later with a single `scaleway_container_domain` resource.
 my-app/
 ├── README.md                    # operating manual for the repo
 ├── .github/workflows/
-│   ├── terraform-plan.yml       # PR: fmt + validate + plan (staging & prod)
-│   ├── terraform-apply.yml      # main: apply staging -> approval -> apply prod
+│   ├── terraform-plan.yml       # PR: fmt + validate + plan (every environment)
+│   ├── terraform-apply.yml      # main: apply each env in order; production gated
 │   └── terraform-drift.yml      # weekly: read-only plan, opens an issue on drift
 ├── versions.tf · providers.tf · backend.tf
 ├── backend.hcl.example          # state bucket coordinates (backend.hcl is git-ignored)
 ├── variables.tf · main.tf · outputs.tf
-├── staging.tfvars · prod.tfvars # non-sensitive config only, committed
-└── modules/app_stack/           # registry + container + database + db credential
+├── <env>.tfvars                 # one per environment, non-sensitive config, committed
+└── modules/app_stack/           # registry + container + database (+ object storage) + credentials
 ```
 
-Environments are separated with **Terraform workspaces**: same code, two
-independent states in one bucket, differences confined to the two `.tfvars`
-files.
+Environments are separated with **Terraform workspaces**: same code, one
+independent state per environment in one bucket, differences confined to the
+per-environment `<env>.tfvars` files.
 
-| Data                              | Lives in                 | Why                                                                  |
-| --------------------------------- | ------------------------ | -------------------------------------------------------------------- |
-| Scaleway API keys                 | GitHub encrypted secrets | CI needs them to run Terraform                                       |
-| Infisical machine identity        | GitHub encrypted secrets | Lets Terraform read app secrets at plan/apply                        |
-| Basic Auth user/password          | Infisical (staging)      | App secret, injected into the container, rotatable                   |
-| Database connection string        | Infisical (both envs)    | Complete, ready-to-use value synced by the pipeline after each apply |
-| Bucket, region, Infisical project | GitHub variables         | Non-sensitive wiring, editable in one place                          |
-| Project name, scaling, image      | Committed tfvars         | Reviewable configuration, no secrets                                 |
+| Data                                | Lives in                 | Why                                                                  |
+| ----------------------------------- | ------------------------ | -------------------------------------------------------------------- |
+| Scaleway API keys                   | GitHub encrypted secrets | CI needs them to run Terraform                                       |
+| Infisical machine identity          | GitHub encrypted secrets | Lets Terraform read app secrets at plan/apply                        |
+| Basic Auth user/password            | Infisical (non-prod)     | App secret, injected into the container, rotatable                   |
+| Database connection string          | Infisical (each env)     | Complete, ready-to-use value synced by the pipeline after each apply |
+| Object Storage coordinates (opt-in) | Infisical (each env)     | `S3_*` values synced by the pipeline after each apply                |
+| Bucket, region, Infisical project   | GitHub variables         | Non-sensitive wiring, editable in one place                          |
+| Project name, scaling, image        | Committed tfvars         | Reviewable configuration, no secrets                                 |
 
 ## After the bootstrap
 
@@ -206,19 +209,21 @@ day-2 work (scaling, rotating secrets, custom domains, troubleshooting). The
 short version of the first deploy:
 
 1. **Push to `main`** (or merge a PR): the pipeline provisions registry and
-   databases. Approve the `production` gate when prompted.
+   databases (and an Object Storage bucket, if enabled). Approve the
+   `production` gate when prompted.
 2. **Build and push your app image** to the registry endpoint from the apply
-   output:
+   output (replace `<env>` with your target environment):
    ```sh
-   docker login rg.fr-par.scw.cloud/my-app-staging -u nologin --password-stdin <<< "$SCW_SECRET_KEY"
-   docker build -t rg.fr-par.scw.cloud/my-app-staging/app:latest .
-   docker push rg.fr-par.scw.cloud/my-app-staging/app:latest
+   docker login rg.fr-par.scw.cloud/my-app-<env> -u nologin --password-stdin <<< "$SCW_SECRET_KEY"
+   docker build -t rg.fr-par.scw.cloud/my-app-<env>/app:latest .
+   docker push rg.fr-par.scw.cloud/my-app-<env>/app:latest
    ```
 3. **Set `container_image`** in the tfvars and open a PR: the next apply
    creates the containers.
 4. **Replace the placeholder secrets** in Infisical with real values. The app
-   reads `DATABASE_URL` and `BASIC_AUTH_*` from its environment; on staging
-   it also receives `BASIC_AUTH_ENABLED=true` and enforces it.
+   reads `DATABASE_URL`, `BASIC_AUTH_*` and (if enabled) `S3_*` from its
+   environment; non-production environments also receive `BASIC_AUTH_ENABLED=true`
+   and enforce it.
 
 ## Prerequisites
 
@@ -280,7 +285,8 @@ creating anything**.
   locking (`use_lockfile`), so concurrent applies cannot corrupt it.
 - The app connects to its database with a **dedicated least-privilege IAM
   credential** (read/write on that database, nothing else), not with your
-  main API key.
+  main API key. Object Storage, when enabled, gets its own separate dedicated
+  credential the same way.
 - A weekly drift-detection plan opens an issue when the real infrastructure
   no longer matches the code.
 
@@ -296,6 +302,7 @@ included (Scaleway `fr-par` list prices, excl. VAT):
 | Serverless SQL (both envs)        | idle most of the time      | ~€0.20 storage + a few cents of compute    |
 | Object Storage (Terraform state)  | a few MB                   | ~€0                                        |
 | Container Registry                | 1-2 image versions         | ~€0.05 (€0 if the registry is public)      |
+| Object Storage (optional)         | only if `--object-storage` | ~€0 idle (a few GB of storage when used)   |
 | **Total to start**                |                            | **under ~€1 / month**                      |
 
 Compute is billed per second, only while actually serving: an idle container
@@ -331,9 +338,20 @@ Scaleway Serverless Containers have no built-in auth in front of public
 endpoints. Credentials live in Infisical, the container gets
 `BASIC_AUTH_ENABLED=true`, and a few lines of middleware enforce it.
 
-**Can I add more environments?**
-Yes: add a workspace, a `<env>.tfvars`, an Infisical environment, and mirror
-one job in each workflow.
+**Which environments do I get, and can I change them?**
+You choose at creation: production only, staging + production (default), or
+dev + staging + production — interactively or with `--environments`
+(e.g. `--environments prod` or `--environments dev,staging,prod`). Production
+is always gated by a manual approval; non-production environments enable Basic
+Auth by default. To add one to an existing repo later: add a `<env>.tfvars`,
+an Infisical environment, a matrix entry in the plan/drift workflows, and a
+chained job in `terraform-apply.yml`.
+
+**Can I store files, not just rows?**
+Yes, opt in with `--object-storage` (or answer yes interactively). Each
+environment gets its own Object Storage bucket and a dedicated credential; the
+pipeline syncs the `S3_*` coordinates to Infisical for the app to read. It is
+off by default — many apps only need the database.
 
 ## CLI reference
 
@@ -352,7 +370,12 @@ one job in each workflow.
 --github-token <token>         or env GITHUB_TOKEN / GH_TOKEN (scopes: repo, workflow)
 --repo-name <name>             GitHub repository name (default: project name)
 --private / --public           Repository visibility (default: public)
---no-basic-auth                Disable Basic Auth on staging
+--environments <preset>        prod | staging+prod | dev+staging+prod
+                               (or a list like "dev,staging,prod"; default staging+prod)
+--object-storage               Provision a per-environment Object Storage bucket
+--no-object-storage            Do not provision Object Storage (default)
+--no-basic-auth                Disable Basic Auth on non-production environments
+--dev-min-scale <n>            Default 0        --dev-max-scale <n>       Default 1
 --staging-min-scale <n>        Default 0        --staging-max-scale <n>   Default 1
 --prod-min-scale <n>           Default 0        --prod-max-scale <n>      Default 2
 --config <file.json>           Load answers from a JSON file
@@ -368,8 +391,10 @@ is taken from the environment or asked interactively:
 {
   "projectName": "my-app",
   "region": "fr-par",
+  "environments": ["staging", "prod"],
+  "objectStorage": true,
   "github": { "repoPrivate": true },
-  "scaling": { "prodMaxScale": 4 }
+  "scaling": { "prod": { "maxScale": 4 } }
 }
 ```
 

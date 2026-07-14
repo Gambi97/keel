@@ -2,8 +2,12 @@ import * as p from '@clack/prompts';
 
 import {
   ConfigError,
+  DEFAULT_ENV_PRESET,
   DEFAULT_INFISICAL_HOST,
   DEFAULT_REGION,
+  ENV_PRESETS,
+  envDefaultScale,
+  type EnvSlug,
   REGIONS,
   type PartialAnswers,
   validateProjectName,
@@ -116,10 +120,41 @@ export async function fillMissing(
     );
   }
 
-  if (out.basicAuthStaging === undefined) {
-    out.basicAuthStaging = await ask(
+  if (!out.environments || out.environments.length === 0) {
+    const preset = await ask(
+      p.select({
+        message: 'Which environments do you want?',
+        initialValue: DEFAULT_ENV_PRESET,
+        options: [
+          { value: 'prod', label: 'Production only', hint: 'single environment' },
+          {
+            value: 'staging+prod',
+            label: 'Staging + Production',
+            hint: 'recommended',
+          },
+          { value: 'dev+staging+prod', label: 'Dev + Staging + Production' },
+        ],
+      }),
+    );
+    out.environments = ENV_PRESETS[preset];
+  }
+  const slugs = out.environments as EnvSlug[];
+  const hasNonProd = slugs.some((s) => s !== 'prod');
+
+  if (out.objectStorage === undefined) {
+    out.objectStorage = await ask(
       p.confirm({
-        message: 'Protect staging with Basic Auth (enforced by your app)?',
+        message:
+          'Provision an Object Storage bucket for application files (in addition to the database)?',
+        initialValue: false,
+      }),
+    );
+  }
+
+  if (hasNonProd && out.basicAuth === undefined) {
+    out.basicAuth = await ask(
+      p.confirm({
+        message: 'Protect non-production environments with Basic Auth (enforced by your app)?',
         initialValue: true,
       }),
     );
@@ -136,16 +171,13 @@ export async function fillMissing(
           }),
         ),
       );
-    out.scaling.stagingMinScale = await scale(
-      'Staging min scale',
-      out.scaling.stagingMinScale ?? 0,
-    );
-    out.scaling.stagingMaxScale = await scale(
-      'Staging max scale',
-      out.scaling.stagingMaxScale ?? 1,
-    );
-    out.scaling.prodMinScale = await scale('Prod min scale', out.scaling.prodMinScale ?? 0);
-    out.scaling.prodMaxScale = await scale('Prod max scale', out.scaling.prodMaxScale ?? 2);
+    for (const slug of slugs) {
+      const def = envDefaultScale(slug);
+      const current = out.scaling[slug] ?? {};
+      current.minScale = await scale(`${slug} min scale`, current.minScale ?? def.minScale);
+      current.maxScale = await scale(`${slug} max scale`, current.maxScale ?? def.maxScale);
+      out.scaling[slug] = current;
+    }
   }
 
   return out;

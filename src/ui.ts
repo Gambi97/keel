@@ -37,6 +37,7 @@ export async function withSpinner<T>(label: string, fn: () => Promise<T>): Promi
 }
 
 export function renderSummary(answers: Answers, dryRun: boolean): string {
+  const envSlugs = answers.environments.map((e) => e.slug).join(', ');
   const lines = [
     `Project          ${answers.projectName}`,
     `Directory        ./${answers.targetDir}`,
@@ -55,12 +56,21 @@ export function renderSummary(answers: Answers, dryRun: boolean): string {
     'Infisical',
     `  host           ${answers.infisical.host}`,
     `  project        ${answers.infisical.projectName} (created or reused)`,
-    `  environments   staging, prod (+ placeholder secrets)`,
+    `  environments   ${envSlugs} (+ placeholder secrets)`,
     '',
-    `Basic Auth on staging   ${answers.basicAuthStaging ? 'enabled' : 'disabled'}`,
-    `Scaling staging         ${answers.scaling.stagingMinScale}-${answers.scaling.stagingMaxScale} instances`,
-    `Scaling prod            ${answers.scaling.prodMinScale}-${answers.scaling.prodMaxScale} instances`,
+    `Object Storage   ${answers.objectStorage ? 'enabled (per-environment bucket + S3_* secrets)' : 'disabled'}`,
+    'Environments',
   ];
+  for (const env of answers.environments) {
+    const flags = [
+      `scale ${env.minScale}-${env.maxScale}`,
+      env.gated ? 'manual approval' : 'auto-deploy',
+      env.basicAuth ? 'basic auth' : null,
+    ]
+      .filter(Boolean)
+      .join(', ');
+    lines.push(`  ${env.slug.padEnd(8)} ${flags}`);
+  }
   if (dryRun) {
     lines.push('', 'DRY RUN: files will be generated locally, no account will be touched.');
   }
@@ -81,7 +91,7 @@ export function renderNextSteps(
     `     project "${answers.infisical.projectName}" with real values.`,
     `  3. Push to main (or merge a PR) to trigger the first terraform apply:`,
     `     ${repoUrl}/actions`,
-    `  4. Set container_image in staging.tfvars / prod.tfvars once an image exists.`,
+    `  4. Set container_image in ${answers.environments.map((e) => `${e.slug}.tfvars`).join(' / ')} once an image exists.`,
     '',
     `Repository: ${repoUrl}`,
   ].join('\n');

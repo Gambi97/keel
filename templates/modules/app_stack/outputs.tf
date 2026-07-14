@@ -21,3 +21,21 @@ output "database_url" {
 output "container_namespace_id" {
   value = scaleway_container_namespace.this.id
 }
+
+output "object_bucket_name" {
+  value = var.enable_object_storage ? scaleway_object_bucket.files[0].name : null
+}
+
+output "object_bucket_endpoint" {
+  value = var.enable_object_storage ? "https://s3.${var.region}.scw.cloud" : null
+}
+
+output "object_storage_access_key" {
+  value     = var.enable_object_storage ? scaleway_iam_api_key.storage[0].access_key : null
+  sensitive = true
+}
+
+output "object_storage_secret_key" {
+  value     = var.enable_object_storage ? scaleway_iam_api_key.storage[0].secret_key : null
+  sensitive = true
+}
