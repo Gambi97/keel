@@ -20,7 +20,8 @@ module "app_stack" {
   db_min_cpu      = var.db_min_cpu
   db_max_cpu      = var.db_max_cpu
 
-  enable_basic_auth = var.enable_basic_auth
+  enable_basic_auth     = var.enable_basic_auth
+  enable_object_storage = var.enable_object_storage
 
   secret_environment_variables = {
     for name, secret in data.infisical_secrets.app.secrets : name => secret.value

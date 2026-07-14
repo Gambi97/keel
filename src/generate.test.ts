@@ -51,7 +51,7 @@ describe('generateProject', () => {
       '.github/workflows/terraform-plan.yml',
       '.github/workflows/terraform-apply.yml',
       '.github/workflows/terraform-drift.yml',
-      '.github/scripts/sync-database-url.sh',
+      '.github/scripts/sync-secrets.sh',
     ]) {
       expect(written, expected).toContain(expected);
       expect(existsSync(join(target, expected)), expected).toBe(true);
@@ -64,8 +64,18 @@ describe('generateProject', () => {
     }
 
     const tfvars = readFileSync(join(target, 'staging.tfvars'), 'utf8');
-    expect(tfvars).toContain('project_name      = "demo-app"');
-    expect(tfvars).toContain('enable_basic_auth = true');
+    expect(tfvars).toMatch(/project_name\s+= "demo-app"/);
+    expect(tfvars).toMatch(/environment\s+= "staging"/);
+    expect(tfvars).toMatch(/enable_basic_auth\s+= true/);
+    expect(tfvars).toMatch(/enable_object_storage\s+= false/);
+
+    // The apply workflow has one chained job per environment.
+    const apply = readFileSync(join(target, '.github/workflows/terraform-apply.yml'), 'utf8');
+    expect(apply).toContain('apply-staging:');
+    expect(apply).toContain('apply-prod:');
+    expect(apply).toContain('needs: apply-staging');
+    expect(apply).toContain('environment: production');
+    expect(apply).toContain('./.github/scripts/sync-secrets.sh prod');
 
     const backend = readFileSync(join(target, 'backend.hcl.example'), 'utf8');
     expect(backend).toContain('bucket = "demo-app-tfstate"');
@@ -76,7 +86,7 @@ describe('generateProject', () => {
     expect(readFileSync(join(target, '.gitignore'), 'utf8')).toContain('backend.hcl');
 
     // Pipeline helper script must be executable.
-    const mode = statSync(join(target, '.github/scripts/sync-database-url.sh')).mode;
+    const mode = statSync(join(target, '.github/scripts/sync-secrets.sh')).mode;
     expect(mode & 0o100).toBeTruthy();
 
     // The _gitignore rename must not leak the placeholder name.

@@ -6,6 +6,8 @@ import {
   fromEnv,
   mergeAnswers,
   missingRequired,
+  normalizeEnvSlugs,
+  parseEnvironments,
   stateBucketName,
   validateProjectName,
   validateRegion,
@@ -113,19 +115,63 @@ describe('finalizeAnswers', () => {
     expect(answers.github.repoName).toBe('my-app');
     expect(answers.github.repoPrivate).toBe(false);
     expect(answers.infisical.host).toBe('https://app.infisical.com');
-    expect(answers.basicAuthStaging).toBe(true);
-    expect(answers.scaling).toEqual({
-      stagingMinScale: 0,
-      stagingMaxScale: 1,
-      prodMinScale: 0,
-      prodMaxScale: 2,
-    });
+    expect(answers.basicAuth).toBe(true);
+    expect(answers.objectStorage).toBe(false);
+  });
+
+  it('defaults to the staging+prod preset with sensible per-env rules', () => {
+    const answers = finalizeAnswers(structuredClone(fullPartial));
+    expect(answers.environments.map((e) => e.slug)).toEqual(['staging', 'prod']);
+    const staging = answers.environments.find((e) => e.slug === 'staging')!;
+    const prod = answers.environments.find((e) => e.slug === 'prod')!;
+    // Production is gated and never basic-auth'd; non-prod is auto-deploy + basic auth.
+    expect(prod.gated).toBe(true);
+    expect(prod.basicAuth).toBe(false);
+    expect(prod.githubEnvironment).toBe('production');
+    expect(prod.maxScale).toBe(2);
+    expect(staging.gated).toBe(false);
+    expect(staging.basicAuth).toBe(true);
+    expect(staging.githubEnvironment).toBe('staging');
+    expect(staging.maxScale).toBe(1);
+  });
+
+  it('honours a chosen environment set, object storage and scaling overrides', () => {
+    const partial = structuredClone(fullPartial);
+    partial.environments = ['prod'];
+    partial.objectStorage = true;
+    partial.scaling = { prod: { minScale: 1, maxScale: 5 } };
+    const answers = finalizeAnswers(partial);
+    expect(answers.environments.map((e) => e.slug)).toEqual(['prod']);
+    expect(answers.objectStorage).toBe(true);
+    expect(answers.environments[0].minScale).toBe(1);
+    expect(answers.environments[0].maxScale).toBe(5);
+  });
+
+  it('disables non-prod basic auth when basicAuth is false', () => {
+    const partial = structuredClone(fullPartial);
+    partial.basicAuth = false;
+    const staging = finalizeAnswers(partial).environments.find((e) => e.slug === 'staging')!;
+    expect(staging.basicAuth).toBe(false);
   });
 
   it('throws with a clear message when a credential is missing', () => {
     const partial = structuredClone(fullPartial);
     partial.scaleway.secretKey = '';
     expect(() => finalizeAnswers(partial)).toThrow(/Scaleway secret key/);
+  });
+});
+
+describe('parseEnvironments / normalizeEnvSlugs', () => {
+  it('resolves presets and free lists into deploy order', () => {
+    expect(parseEnvironments('staging+prod')).toEqual(['staging', 'prod']);
+    expect(parseEnvironments('prod')).toEqual(['prod']);
+    expect(parseEnvironments('prod,dev,staging')).toEqual(['dev', 'staging', 'prod']);
+    expect(normalizeEnvSlugs(['prod', 'prod'])).toEqual(['prod']);
+  });
+
+  it('rejects unknown environments', () => {
+    expect(() => parseEnvironments('qa')).toThrow(ConfigError);
+    expect(() => normalizeEnvSlugs([])).toThrow(ConfigError);
   });
 });
 

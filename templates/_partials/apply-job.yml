@@ -1,0 +1,34 @@
+  apply-__ENV_SLUG__:
+    name: apply (__ENV_SLUG__)
+    runs-on: ubuntu-latest
+__NEEDS_LINE__    # The GitHub environment may carry a required-reviewer rule, gating this job.
+    environment: __GH_ENVIRONMENT__
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: "~1.12"
+          terraform_wrapper: false
+
+      - name: Write backend config
+        run: |
+          cat > backend.hcl <<EOF
+          bucket = "${{ vars.TF_STATE_BUCKET }}"
+          region = "${{ vars.SCW_REGION }}"
+          endpoints = {
+            s3 = "https://s3.${{ vars.SCW_REGION }}.scw.cloud"
+          }
+          EOF
+
+      - name: Terraform init
+        run: terraform init -input=false -backend-config=backend.hcl
+
+      - name: Select workspace
+        run: terraform workspace select -or-create __ENV_SLUG__
+
+      - name: Terraform apply
+        run: terraform apply -input=false -auto-approve -var-file=__ENV_SLUG__.tfvars
+
+      - name: Sync secrets to Infisical
+        run: ./.github/scripts/sync-secrets.sh __ENV_SLUG__

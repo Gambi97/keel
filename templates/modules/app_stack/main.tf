@@ -44,6 +44,40 @@ resource "scaleway_iam_api_key" "db" {
   description    = "Database credential for ${local.name} (managed by Terraform)"
 }
 
+# Optional Object Storage bucket for application files (uploads, assets, …),
+# with a dedicated least-privilege credential just like the database: this
+# application can reach Object Storage and nothing else. Its access/secret key
+# and the bucket coordinates are synced to Infisical after each apply.
+resource "scaleway_object_bucket" "files" {
+  count  = var.enable_object_storage ? 1 : 0
+  name   = "${local.name}-files"
+  region = var.region
+}
+
+resource "scaleway_iam_application" "storage" {
+  count       = var.enable_object_storage ? 1 : 0
+  name        = "${local.name}-storage"
+  description = "Object Storage access for ${local.name} (managed by Terraform)"
+}
+
+resource "scaleway_iam_policy" "storage_access" {
+  count          = var.enable_object_storage ? 1 : 0
+  name           = "${local.name}-storage-access"
+  description    = "Object Storage access for ${local.name}"
+  application_id = scaleway_iam_application.storage[0].id
+
+  rule {
+    project_ids          = [scaleway_sdb_sql_database.this.project_id]
+    permission_set_names = ["ObjectStorageFullAccess"]
+  }
+}
+
+resource "scaleway_iam_api_key" "storage" {
+  count          = var.enable_object_storage ? 1 : 0
+  application_id = scaleway_iam_application.storage[0].id
+  description    = "Object Storage credential for ${local.name} (managed by Terraform)"
+}
+
 # The container is gated on an image being available: registry and database
 # are provisioned first, the container appears once an image has been pushed
 # and container_image is set.

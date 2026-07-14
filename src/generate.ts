@@ -25,16 +25,71 @@ export function templatesDir(): string {
   return fileURLToPath(new URL('../templates', import.meta.url));
 }
 
+/** Global tokens shared by every non per-environment template. */
 export function tokenMap(answers: Answers): Record<string, string> {
+  const slugs = answers.environments.map((e) => e.slug);
   return {
     __PROJECT_NAME__: answers.projectName,
     __REGION__: answers.region,
     __TF_STATE_BUCKET__: answers.stateBucket,
-    __STAGING_MIN_SCALE__: String(answers.scaling.stagingMinScale),
-    __STAGING_MAX_SCALE__: String(answers.scaling.stagingMaxScale),
-    __PROD_MIN_SCALE__: String(answers.scaling.prodMinScale),
-    __PROD_MAX_SCALE__: String(answers.scaling.prodMaxScale),
+    // YAML inline list for the plan/drift job matrix, e.g. [staging, prod].
+    __ENV_MATRIX__: `[${slugs.join(', ')}]`,
+    // HCL list for the `environment` variable validation in variables.tf.
+    __ENV_SLUGS_TF__: `[${slugs.map((s) => `"${s}"`).join(', ')}]`,
   };
+}
+
+/** Tokens for one rendered `<env>.tfvars` file. */
+function envTfvarsTokens(
+  answers: Answers,
+  env: Answers['environments'][number],
+): Record<string, string> {
+  return {
+    __PROJECT_NAME__: answers.projectName,
+    __REGION__: answers.region,
+    __ENVIRONMENT__: env.slug,
+    __ENABLE_BASIC_AUTH__: String(env.basicAuth),
+    __ENABLE_OBJECT_STORAGE__: String(answers.objectStorage),
+    __MIN_SCALE__: String(env.minScale),
+    __MAX_SCALE__: String(env.maxScale),
+  };
+}
+
+/** Templates rendered specially (per environment) instead of copied 1:1. */
+const SPECIAL_TEMPLATES = new Set(['env.tfvars', '.github/workflows/terraform-apply.yml']);
+
+function isSpecial(rel: string): boolean {
+  return SPECIAL_TEMPLATES.has(rel) || rel.startsWith('_partials/');
+}
+
+/**
+ * Assemble the apply workflow: the shared header, then one job per environment
+ * in deploy order, each `needs:` the previous so applies run sequentially.
+ */
+function renderApplyWorkflow(
+  source: string,
+  answers: Answers,
+  globalTokens: Record<string, string>,
+): string {
+  const header = renderContent(
+    readFileSync(join(source, '_partials/apply-header.yml'), 'utf8'),
+    globalTokens,
+    '_partials/apply-header.yml',
+  );
+  const jobTemplate = readFileSync(join(source, '_partials/apply-job.yml'), 'utf8');
+  const jobs = answers.environments.map((env, i) => {
+    const previous = answers.environments[i - 1];
+    return renderContent(
+      jobTemplate,
+      {
+        __ENV_SLUG__: env.slug,
+        __GH_ENVIRONMENT__: env.githubEnvironment,
+        __NEEDS_LINE__: previous ? `    needs: apply-${previous.slug}\n` : '',
+      },
+      '_partials/apply-job.yml',
+    );
+  });
+  return header + jobs.join('\n');
 }
 
 function renderContent(content: string, tokens: Record<string, string>, file: string): string {
@@ -83,6 +138,7 @@ export function generateProject(answers: Answers, options: GenerateOptions = {})
 
   const written: string[] = [];
   for (const rel of walk(source)) {
+    if (isSpecial(rel)) continue;
     const parts = rel.split('/');
     const fileName = parts[parts.length - 1] ?? rel;
     const destRel = [...parts.slice(0, -1), RENAMES[fileName] ?? fileName].join('/');
@@ -95,6 +151,23 @@ export function generateProject(answers: Answers, options: GenerateOptions = {})
     }
     written.push(destRel);
   }
+
+  // Per-environment tfvars: one <slug>.tfvars from the shared env.tfvars template.
+  const envTemplate = readFileSync(join(source, 'env.tfvars'), 'utf8');
+  for (const env of answers.environments) {
+    const destRel = `${env.slug}.tfvars`;
+    writeFileSync(
+      join(target, destRel),
+      renderContent(envTemplate, envTfvarsTokens(answers, env), 'env.tfvars'),
+    );
+    written.push(destRel);
+  }
+
+  // Apply workflow: a header plus one deploy job per environment, chained so
+  // each environment applies only after the previous one succeeded.
+  const applyDestRel = '.github/workflows/terraform-apply.yml';
+  writeFileSync(join(target, applyDestRel), renderApplyWorkflow(source, answers, tokens));
+  written.push(applyDestRel);
 
   // backend.hcl (git-ignored) so local terraform runs work out of the box.
   cpSync(join(target, 'backend.hcl.example'), join(target, 'backend.hcl'));

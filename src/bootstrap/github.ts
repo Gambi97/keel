@@ -135,8 +135,8 @@ export async function configureRepo(
     INFISICAL_PROJECT_ID: infisicalProjectId,
     INFISICAL_HOST: answers.infisical.host,
   });
-  await configureEnvironments(ctx);
-  await protectMainBranch(ctx);
+  await configureEnvironments(ctx, answers);
+  await protectMainBranch(ctx, answers);
 }
 
 async function setSecrets(ctx: GitHubContext, secrets: Record<string, string>): Promise<void> {
@@ -181,30 +181,28 @@ async function setVariables(ctx: GitHubContext, variables: Record<string, string
   }
 }
 
-/** staging deploys automatically; production requires a manual approval. */
-async function configureEnvironments(ctx: GitHubContext): Promise<void> {
-  await ctx.octokit.repos.createOrUpdateEnvironment({
-    owner: ctx.owner,
-    repo: ctx.repo,
-    environment_name: 'staging',
-  });
-  await ctx.octokit.repos.createOrUpdateEnvironment({
-    owner: ctx.owner,
-    repo: ctx.repo,
-    environment_name: 'production',
-    reviewers: [{ type: 'User', id: ctx.ownerId }],
-  });
+/** Each environment gets a GitHub deployment environment; gated ones (prod) require approval. */
+async function configureEnvironments(ctx: GitHubContext, answers: Answers): Promise<void> {
+  for (const env of answers.environments) {
+    await ctx.octokit.repos.createOrUpdateEnvironment({
+      owner: ctx.owner,
+      repo: ctx.repo,
+      environment_name: env.githubEnvironment,
+      ...(env.gated ? { reviewers: [{ type: 'User', id: ctx.ownerId }] } : {}),
+    });
+  }
 }
 
 /** Require a green plan on PRs and forbid force-pushes/deletion of main. */
-async function protectMainBranch(ctx: GitHubContext): Promise<void> {
+async function protectMainBranch(ctx: GitHubContext, answers: Answers): Promise<void> {
   await ctx.octokit.repos.updateBranchProtection({
     owner: ctx.owner,
     repo: ctx.repo,
     branch: 'main',
     required_status_checks: {
       strict: false,
-      contexts: ['plan (staging)', 'plan (prod)'],
+      // Matches the job names produced by the plan workflow: "plan (<slug>)".
+      contexts: answers.environments.map((env) => `plan (${env.slug})`),
     },
     enforce_admins: false,
     required_pull_request_reviews: null,

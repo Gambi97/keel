@@ -17,12 +17,14 @@ here.
 | Container namespace + Serverless Container | Runs the app, scales to zero when idle |
 | Serverless SQL Database (Postgres) | One independent database per environment |
 | IAM application + API key | Dedicated least-privilege database credential for the app |
+| Object Storage bucket (optional) | Per-environment file store, with its own least-privilege credential |
 
-Two environments, **staging** and **prod**, isolated via Terraform
-workspaces: same code, two separate states, differences confined to
-`staging.tfvars` / `prod.tfvars`. Staging expects the app to enforce Basic
-Auth (see below). State lives in the `__PROJECT_NAME__-tfstate` bucket on
-Scaleway Object Storage.
+Each environment is isolated via a Terraform **workspace**: same code, one
+independent state per environment, differences confined to the committed
+`<env>.tfvars` files (one per environment — look at the `*.tfvars` in this
+repo to see which ones your project has). Non-production environments expect
+the app to enforce Basic Auth (see below). State lives in the
+`__PROJECT_NAME__-tfstate` bucket on Scaleway Object Storage.
 
 **There are no secrets in this repository**, and none should ever be added.
 Credentials live in GitHub Actions encrypted secrets (CI) and in Infisical
@@ -31,21 +33,24 @@ Credentials live in GitHub Actions encrypted secrets (CI) and in Infisical
 > Naming heads-up: `backend.tf` configures the Terraform **state backend**,
 > the bucket where Terraform records what it has created. It has nothing to
 > do with your application's backend, which is just the Docker image you
-> deploy.
+> deploy. The optional Object Storage bucket above is a separate,
+> application-facing file store.
 
 ## How deploys work
 
 ```
-PR to main        -> terraform fmt + validate + plan (staging & prod), shown as PR checks
-merge/push main   -> apply staging -> manual approval (production gate) -> apply prod
+PR to main        -> terraform fmt + validate + plan (every environment), shown as PR checks
+merge/push main   -> apply each environment in order; any gated environment (production) waits for manual approval
 ```
 
 - `main` is protected: PRs need a green plan, force pushes are blocked.
-- The prod apply waits for approval on the `production` GitHub Environment.
-- After each apply, the pipeline writes a ready-to-use Postgres connection
-  string to Infisical as `DATABASE_URL` for that environment. The credential
-  inside it is a dedicated IAM application that can only read/write the
-  database (least privilege), not your main API key.
+- Environments apply in order, each `needs:` the previous one; a gated
+  environment (production) waits for approval on its GitHub Environment.
+- After each apply, the pipeline syncs the secrets Terraform produced to
+  Infisical for that environment: a ready-to-use Postgres `DATABASE_URL`
+  (whose credential is a dedicated IAM application that can only read/write
+  the database, not your main API key) and, when Object Storage is enabled,
+  the `S3_*` coordinates.
 - State is locked during applies (S3-native locking, `use_lockfile`), so
   concurrent runs cannot corrupt it.
 - A scheduled **drift detection** workflow (Monday 06:00 UTC, or manual via
@@ -55,43 +60,45 @@ merge/push main   -> apply staging -> manual approval (production gate) -> apply
 ## First deploy
 
 1. **Merge or push to `main`.** The first pipeline run creates registry and
-   databases. The Serverless Container is intentionally skipped until an
-   image exists (`container_image` is empty), so the first apply is green.
+   databases (and the Object Storage bucket, if enabled). The Serverless
+   Container is intentionally skipped until an image exists (`container_image`
+   is empty), so the first apply is green.
 
 2. **Build and push the app image** (any Dockerfile, listening on port 8080
-   by default):
+   by default), replacing `<env>` with your target environment (e.g. staging):
 
    ```sh
-   docker login rg.__REGION__.scw.cloud/__PROJECT_NAME__-staging -u nologin --password-stdin <<< "$SCW_SECRET_KEY"
-   docker build -t rg.__REGION__.scw.cloud/__PROJECT_NAME__-staging/app:latest .
-   docker push rg.__REGION__.scw.cloud/__PROJECT_NAME__-staging/app:latest
+   docker login rg.__REGION__.scw.cloud/__PROJECT_NAME__-<env> -u nologin --password-stdin <<< "$SCW_SECRET_KEY"
+   docker build -t rg.__REGION__.scw.cloud/__PROJECT_NAME__-<env>/app:latest .
+   docker push rg.__REGION__.scw.cloud/__PROJECT_NAME__-<env>/app:latest
    ```
 
-3. **Point the container at the image**: set `container_image` in
-   `staging.tfvars` (and later in `prod.tfvars`, using the prod registry),
-   open a PR, review the plan, merge. The apply creates the container and
-   prints its URL (`terraform output container_url`).
+3. **Point the container at the image**: set `container_image` in the target
+   `<env>.tfvars`, open a PR, review the plan, merge. The apply creates the
+   container and prints its URL (`terraform output container_url`).
 
 4. **Fill in the real secrets in Infisical.** The bootstrap seeded
-   placeholders; replace them with production values. The app reads
-   everything from its environment:
+   placeholders; replace them with real values. The app reads everything from
+   its environment:
 
-   | Variable | Environment | Notes |
+   | Variable | Where | Notes |
    |---|---|---|
-   | `DATABASE_URL` | staging + prod | Complete connection string, auto-updated by the pipeline after each apply. No action needed |
-   | `BASIC_AUTH_USER` / `BASIC_AUTH_PASSWORD` | staging | The app must enforce these when `BASIC_AUTH_ENABLED=true` |
+   | `DATABASE_URL` | every environment | Complete connection string, auto-updated by the pipeline after each apply. No action needed |
+   | `BASIC_AUTH_USER` / `BASIC_AUTH_PASSWORD` | non-production | The app must enforce these when `BASIC_AUTH_ENABLED=true` |
+   | `S3_BUCKET` / `S3_ENDPOINT` / `S3_REGION` / `S3_ACCESS_KEY` / `S3_SECRET_KEY` | every environment (if Object Storage enabled) | Auto-updated by the pipeline after each apply |
 
    Every secret in the Infisical environment is injected into the container
    as a secret environment variable, so adding an app secret is: add it in
    Infisical, re-run the apply (any merge to `main`).
 
-## Basic Auth on staging
+## Basic Auth on non-production environments
 
 Scaleway Serverless Containers expose public endpoints with no built-in auth,
-so staging protection is enforced **by the application**: the container
+so non-production protection is enforced **by the application**: the container
 receives `BASIC_AUTH_ENABLED=true` plus the credentials from Infisical, and
 the app is expected to respond `401` without them (a few lines of middleware
-in any framework). Prod does not set `BASIC_AUTH_ENABLED`.
+in any framework). Production does not set `BASIC_AUTH_ENABLED`. Whether an
+environment enables it is the `enable_basic_auth` flag in its `<env>.tfvars`.
 
 ## Day-2 operations
 
@@ -107,15 +114,18 @@ in any framework). Prod does not set `BASIC_AUTH_ENABLED`.
   secrets (repo Settings > Secrets and variables > Actions).
 - **Add a custom domain**: add a `scaleway_container_domain` resource in
   `modules/app_stack` pointing at the container, plus your DNS record.
-- **Add an environment**: add a workspace, an `<env>.tfvars`, an Infisical
-  environment with the same slug, and mirror one job in each workflow.
+- **Add an environment**: add a `<env>.tfvars`, an Infisical environment with
+  the same slug, an entry in the plan/drift matrix and a job in
+  `.github/workflows/terraform-apply.yml` (mirror an existing one and set its
+  `needs:` to chain after the previous environment).
 - **Pin provider versions**: after any local `terraform init`, commit the
   generated `.terraform.lock.hcl` so CI resolves the exact same provider
   builds on every run.
 
 ## Running Terraform locally (optional)
 
-CI is the source of truth, but plans can be run locally:
+CI is the source of truth, but plans can be run locally (replace `<env>` with
+one of your environments):
 
 ```sh
 cp backend.hcl.example backend.hcl
@@ -131,34 +141,35 @@ export TF_VAR_infisical_project_id=<infisical-project-id>
 export TF_VAR_infisical_host=https://app.infisical.com
 
 terraform init -backend-config=backend.hcl
-terraform workspace select -or-create staging
-terraform plan -var-file=staging.tfvars
+terraform workspace select -or-create <env>
+terraform plan -var-file=<env>.tfvars
 ```
 
 Avoid local applies: they race against CI on the same state.
 
 ## Configuration reference
 
-- **Committed tfvars** (`staging.tfvars`, `prod.tfvars`): non-sensitive knobs
-  only (name, region, scaling, image).
+- **Committed tfvars** (`<env>.tfvars`, one per environment): non-sensitive
+  knobs only (name, region, scaling, image, `enable_basic_auth`,
+  `enable_object_storage`).
 - **GitHub Actions secrets**: `SCW_ACCESS_KEY`, `SCW_SECRET_KEY`,
   `SCW_DEFAULT_PROJECT_ID`, `SCW_DEFAULT_ORGANIZATION_ID`,
   `INFISICAL_CLIENT_ID`, `INFISICAL_CLIENT_SECRET`. The workflows reuse the
   Scaleway keys as `AWS_*` for the state backend.
 - **GitHub Actions variables**: `TF_STATE_BUCKET`, `SCW_REGION`,
   `INFISICAL_PROJECT_ID`, `INFISICAL_HOST`.
-- **Infisical**: one environment per workspace (`staging`, `prod`), all
-  application secrets.
+- **Infisical**: one environment per workspace, all application secrets.
 
 ## Troubleshooting
 
 - **Plan fails with 403 on the state bucket**: the `SCW_*` secrets don't
   match a Scaleway key with Object Storage access.
 - **Plan fails reading Infisical secrets**: check `INFISICAL_PROJECT_ID` and
-  that the machine identity has access to the project and both environments.
+  that the machine identity has access to the project and every environment.
 - **Apply green but no container**: expected until `container_image` is set.
 - **App can't reach the database**: `DATABASE_URL` is only synced after an
   apply; check the value in Infisical for that environment. It must contain
   a username and password (the dedicated IAM credential), not placeholders.
 - **Apply fails creating IAM resources**: the CI Scaleway key needs IAM
-  permissions (IAMManager) to create the app's database credential.
+  permissions (IAMManager) to create the app's database (and Object Storage)
+  credential.

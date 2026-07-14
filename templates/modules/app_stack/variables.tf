@@ -47,6 +47,11 @@ variable "enable_basic_auth" {
   type = bool
 }
 
+variable "enable_object_storage" {
+  type    = bool
+  default = false
+}
+
 variable "secret_environment_variables" {
   description = "Secrets injected into the container, sourced from Infisical."
   type        = map(string)

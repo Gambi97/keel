@@ -13,8 +13,8 @@ variable "environment" {
   type        = string
 
   validation {
-    condition     = contains(["staging", "prod"], var.environment)
-    error_message = "environment must be either \"staging\" or \"prod\"."
+    condition     = contains(__ENV_SLUGS_TF__, var.environment)
+    error_message = "environment must be one of the configured environments."
   }
 }
 
@@ -68,6 +68,12 @@ variable "db_max_cpu" {
 
 variable "enable_basic_auth" {
   description = "When true, the container gets BASIC_AUTH_ENABLED=true and the app is expected to enforce Basic Auth using credentials stored in Infisical."
+  type        = bool
+  default     = false
+}
+
+variable "enable_object_storage" {
+  description = "When true, provision an Object Storage bucket for the app plus a dedicated least-privilege credential; its coordinates are synced to Infisical as S3_*."
   type        = bool
   default     = false
 }

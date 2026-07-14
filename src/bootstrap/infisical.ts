@@ -87,10 +87,10 @@ async function ensureEnvironment(
   host: string,
   token: string,
   project: InfisicalProject,
-  slug: 'staging' | 'prod',
+  slug: string,
+  name: string,
 ): Promise<void> {
   if (project.environments?.some((e) => e.slug === slug)) return;
-  const name = slug === 'prod' ? 'Production' : 'Staging';
   const { status, data } = await api<{ message?: string }>(
     host,
     `/api/v1/workspace/${project.id}/environments`,
@@ -108,7 +108,7 @@ async function seedSecret(
   host: string,
   token: string,
   projectId: string,
-  environment: 'staging' | 'prod',
+  environment: string,
   name: string,
   value: string,
 ): Promise<void> {
@@ -138,7 +138,15 @@ export interface InfisicalBootstrapResult {
   createdProject: boolean;
 }
 
-/** Create/reuse the project, ensure staging+prod, seed placeholder secrets. */
+const S3_PLACEHOLDER_KEYS = [
+  'S3_BUCKET',
+  'S3_ENDPOINT',
+  'S3_REGION',
+  'S3_ACCESS_KEY',
+  'S3_SECRET_KEY',
+];
+
+/** Create/reuse the project, ensure every environment, seed placeholder secrets. */
 export async function bootstrapInfisical(answers: Answers): Promise<InfisicalBootstrapResult> {
   const { host, projectName } = answers.infisical;
   const token = await login(answers);
@@ -150,23 +158,32 @@ export async function bootstrapInfisical(answers: Answers): Promise<InfisicalBoo
     createdProject = true;
   }
 
-  await ensureEnvironment(host, token, project, 'staging');
-  await ensureEnvironment(host, token, project, 'prod');
-
-  if (answers.basicAuthStaging) {
-    await seedSecret(host, token, project.id, 'staging', 'BASIC_AUTH_USER', 'staging');
-    await seedSecret(
-      host,
-      token,
-      project.id,
-      'staging',
-      'BASIC_AUTH_PASSWORD',
-      randomBytes(18).toString('base64url'),
-    );
+  for (const env of answers.environments) {
+    await ensureEnvironment(host, token, project, env.slug, env.displayName);
   }
+
+  // Real values arrive from the pipeline after the first apply; seed placeholders
+  // now so the secret paths exist and the container has something to read.
   const placeholder = 'placeholder-updated-by-pipeline-after-first-apply';
-  await seedSecret(host, token, project.id, 'staging', 'DATABASE_URL', placeholder);
-  await seedSecret(host, token, project.id, 'prod', 'DATABASE_URL', placeholder);
+  for (const env of answers.environments) {
+    if (env.basicAuth) {
+      await seedSecret(host, token, project.id, env.slug, 'BASIC_AUTH_USER', env.slug);
+      await seedSecret(
+        host,
+        token,
+        project.id,
+        env.slug,
+        'BASIC_AUTH_PASSWORD',
+        randomBytes(18).toString('base64url'),
+      );
+    }
+    await seedSecret(host, token, project.id, env.slug, 'DATABASE_URL', placeholder);
+    if (answers.objectStorage) {
+      for (const key of S3_PLACEHOLDER_KEYS) {
+        await seedSecret(host, token, project.id, env.slug, key, placeholder);
+      }
+    }
+  }
 
   return { projectId: project.id, createdProject };
 }
