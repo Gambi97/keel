@@ -114,10 +114,13 @@ environment enables it is the `enable_basic_auth` flag in its `<env>.tfvars`.
   secrets (repo Settings > Secrets and variables > Actions).
 - **Add a custom domain**: add a `scaleway_container_domain` resource in
   `modules/app_stack` pointing at the container, plus your DNS record.
-- **Add an environment**: add a `<env>.tfvars`, an Infisical environment with
-  the same slug, an entry in the plan/drift matrix and a job in
+- **Add an environment**: add a `<env>.tfvars` at the repo root (the plan and
+  drift workflows discover environments from the tfvars files automatically),
+  create an Infisical environment with the same slug, and add a job in
   `.github/workflows/terraform-apply.yml` (mirror an existing one and set its
-  `needs:` to chain after the previous environment).
+  `needs:` to chain after the previous environment). Note: the new `plan
+  (<env>)` check becomes required on `main` only after you add it in the
+  branch-protection settings.
 - **Pin provider versions**: after any local `terraform init`, commit the
   generated `.terraform.lock.hcl` so CI resolves the exact same provider
   builds on every run.

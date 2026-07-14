@@ -3,6 +3,16 @@ data "infisical_secrets" "app" {
   env_slug     = var.environment
   workspace_id = var.infisical_project_id
   folder_path  = "/"
+
+  lifecycle {
+    # Guards against applying one environment's tfvars into another
+    # environment's state (e.g. prod.tfvars while the staging workspace is
+    # selected), which would create prod-named resources in staging state.
+    precondition {
+      condition     = terraform.workspace == var.environment
+      error_message = "The selected Terraform workspace must match var.environment: run `terraform workspace select <env>` before plan/apply with <env>.tfvars."
+    }
+  }
 }
 
 module "app_stack" {

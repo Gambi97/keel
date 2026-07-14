@@ -7,13 +7,24 @@ import { join } from 'node:path';
 import { Octokit } from '@octokit/rest';
 
 import type { Answers } from '../config.js';
+import { planStatusCheckContext, type CiSecretName, type CiVariableName } from '../contracts.js';
 
 // The ESM build of libsodium-wrappers is broken (missing libsodium.mjs), so
 // load the CommonJS build explicitly.
 const require = createRequire(import.meta.url);
 const sodium = require('libsodium-wrappers') as typeof import('libsodium-wrappers');
 
-export class GitHubError extends Error {}
+/** Which input a validation failure points at, so prompts can re-ask just that. */
+export type GitHubErrorField = 'token' | 'repo';
+
+export class GitHubError extends Error {
+  constructor(
+    message: string,
+    readonly field: GitHubErrorField = 'token',
+  ) {
+    super(message);
+  }
+}
 
 export interface GitHubContext {
   octokit: Octokit;
@@ -23,42 +34,103 @@ export interface GitHubContext {
   repoPrivate: boolean;
 }
 
-export async function createContext(answers: Answers): Promise<GitHubContext> {
-  const octokit = new Octokit({ auth: answers.github.token });
+export async function createContext(
+  github: Pick<Answers['github'], 'token' | 'repoName' | 'repoPrivate'>,
+): Promise<GitHubContext> {
+  // Silence Octokit's own request logging: expected non-2xx responses (a 404
+  // for a repo that does not exist yet, a 401 for a bad token) are handled
+  // here and would otherwise scribble over the prompt spinner.
+  const octokit = new Octokit({
+    auth: github.token,
+    log: { debug: () => {}, info: () => {}, warn: () => {}, error: () => {} },
+  });
   let login: string;
   let ownerId: number;
+  let scopes: string | undefined;
   try {
-    const { data } = await octokit.users.getAuthenticated();
+    const { data, headers } = await octokit.users.getAuthenticated();
     login = data.login;
     ownerId = data.id;
+    scopes = headers['x-oauth-scopes'];
   } catch {
     throw new GitHubError(
       'GitHub rejected the token. It needs the "repo" and "workflow" scopes ' +
         '(classic PAT) or equivalent fine-grained permissions.',
     );
   }
+  // Classic PATs advertise their scopes in a header; fine-grained tokens do
+  // not, so an absent/empty header only means "cannot check here".
+  if (scopes) {
+    const granted = new Set(scopes.split(',').map((s) => s.trim()));
+    for (const required of ['repo', 'workflow'] as const) {
+      if (!granted.has(required)) {
+        throw new GitHubError(
+          `The GitHub token is missing the "${required}" scope (it has: ${scopes}). ` +
+            'Create a classic PAT with the "repo" and "workflow" scopes.',
+        );
+      }
+    }
+  }
   return {
     octokit,
     owner: login,
     ownerId,
-    repo: answers.github.repoName,
-    repoPrivate: answers.github.repoPrivate,
+    repo: github.repoName,
+    repoPrivate: github.repoPrivate,
   };
 }
 
-/** Create the repository, or reuse it when it already exists. */
-export async function ensureRepo(ctx: GitHubContext): Promise<{ created: boolean; url: string }> {
+export type RepoState = 'not-found' | 'empty' | 'non-empty' | 'no-push';
+
+/** Read-only look at the target repository: existence, push access, emptiness. */
+export async function inspectRepo(ctx: GitHubContext): Promise<{ state: RepoState; url?: string }> {
+  let url: string;
   try {
     const { data } = await ctx.octokit.repos.get({ owner: ctx.owner, repo: ctx.repo });
-    if (!data.permissions?.push) {
-      throw new GitHubError(
-        `Repository ${ctx.owner}/${ctx.repo} exists but the token cannot push to it.`,
-      );
-    }
-    return { created: false, url: data.html_url };
+    if (!data.permissions?.push) return { state: 'no-push', url: data.html_url };
+    url = data.html_url;
   } catch (error) {
-    if (error instanceof GitHubError) throw error;
-    if ((error as { status?: number }).status !== 404) throw error;
+    if ((error as { status?: number }).status === 404) return { state: 'not-found' };
+    throw error;
+  }
+  try {
+    const { data } = await ctx.octokit.repos.listCommits({
+      owner: ctx.owner,
+      repo: ctx.repo,
+      per_page: 1,
+    });
+    return { state: data.length > 0 ? 'non-empty' : 'empty', url };
+  } catch (error) {
+    // GitHub answers 409 "Git Repository is empty" for a repo with no commits.
+    if ((error as { status?: number }).status === 409) return { state: 'empty', url };
+    throw error;
+  }
+}
+
+/** Turn a blocking repo state into a GitHubError; pass on 'not-found'/'empty'. */
+export function assertRepoUsable(ctx: GitHubContext, state: RepoState): void {
+  if (state === 'no-push') {
+    throw new GitHubError(
+      `Repository ${ctx.owner}/${ctx.repo} exists but the token cannot push to it.`,
+      'repo',
+    );
+  }
+  if (state === 'non-empty') {
+    throw new GitHubError(
+      `Repository ${ctx.owner}/${ctx.repo} already has commits. keel pushes a brand-new ` +
+        'history, so the push would be rejected: use a new repository name (keel creates ' +
+        'it for you) or an existing repository with no commits.',
+      'repo',
+    );
+  }
+}
+
+/** Create the repository, or reuse it when it already exists and is empty. */
+export async function ensureRepo(ctx: GitHubContext): Promise<{ created: boolean; url: string }> {
+  const inspected = await inspectRepo(ctx);
+  assertRepoUsable(ctx, inspected.state);
+  if (inspected.state !== 'not-found') {
+    return { created: false, url: inspected.url! };
   }
   const { data } = await ctx.octokit.repos.createForAuthenticatedUser({
     name: ctx.repo,
@@ -120,21 +192,25 @@ export async function configureRepo(
   infisicalProjectId: string,
 ): Promise<void> {
   // The workflows map AWS_* (state backend) from the same SCW_* secrets, so
-  // each credential is stored once and rotated in one place.
-  await setSecrets(ctx, {
+  // each credential is stored once and rotated in one place. The Record types
+  // force these names to stay in lockstep with the contracts the generated
+  // workflows are tested against.
+  const secrets: Record<CiSecretName, string> = {
     SCW_ACCESS_KEY: answers.scaleway.accessKey,
     SCW_SECRET_KEY: answers.scaleway.secretKey,
     SCW_DEFAULT_PROJECT_ID: answers.scaleway.projectId,
     SCW_DEFAULT_ORGANIZATION_ID: answers.scaleway.organizationId,
     INFISICAL_CLIENT_ID: answers.infisical.clientId,
     INFISICAL_CLIENT_SECRET: answers.infisical.clientSecret,
-  });
-  await setVariables(ctx, {
+  };
+  await setSecrets(ctx, secrets);
+  const variables: Record<CiVariableName, string> = {
     TF_STATE_BUCKET: answers.stateBucket,
     SCW_REGION: answers.region,
     INFISICAL_PROJECT_ID: infisicalProjectId,
     INFISICAL_HOST: answers.infisical.host,
-  });
+  };
+  await setVariables(ctx, variables);
   await configureEnvironments(ctx, answers);
   await protectMainBranch(ctx, answers);
 }
@@ -201,8 +277,9 @@ async function protectMainBranch(ctx: GitHubContext, answers: Answers): Promise<
     branch: 'main',
     required_status_checks: {
       strict: false,
-      // Matches the job names produced by the plan workflow: "plan (<slug>)".
-      contexts: answers.environments.map((env) => `plan (${env.slug})`),
+      // Must match the job names produced by the plan workflow; the shared
+      // format lives in contracts.ts and is tested against the template.
+      contexts: answers.environments.map((env) => planStatusCheckContext(env.slug)),
     },
     enforce_admins: false,
     required_pull_request_reviews: null,

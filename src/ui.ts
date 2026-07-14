@@ -55,7 +55,11 @@ export function renderSummary(answers: Answers, dryRun: boolean): string {
     '',
     'Infisical',
     `  host           ${answers.infisical.host}`,
-    `  project        ${answers.infisical.projectName} (created or reused)`,
+    `  project        ${
+      answers.infisical.projectId
+        ? `${answers.infisical.projectName} (existing, ${answers.infisical.projectId})`
+        : `${answers.infisical.projectName} (will be created)`
+    }`,
     `  environments   ${envSlugs} (+ placeholder secrets)`,
     '',
     `Object Storage   ${answers.objectStorage ? 'enabled (per-environment bucket + S3_* secrets)' : 'disabled'}`,

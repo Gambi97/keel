@@ -32,8 +32,6 @@ export function tokenMap(answers: Answers): Record<string, string> {
     __PROJECT_NAME__: answers.projectName,
     __REGION__: answers.region,
     __TF_STATE_BUCKET__: answers.stateBucket,
-    // YAML inline list for the plan/drift job matrix, e.g. [staging, prod].
-    __ENV_MATRIX__: `[${slugs.join(', ')}]`,
     // HCL list for the `environment` variable validation in variables.tf.
     __ENV_SLUGS_TF__: `[${slugs.map((s) => `"${s}"`).join(', ')}]`,
   };
@@ -55,7 +53,15 @@ function envTfvarsTokens(
   };
 }
 
-/** Templates rendered specially (per environment) instead of copied 1:1. */
+/**
+ * Templates rendered specially (per environment) instead of copied 1:1.
+ *
+ * Keep this set small: the templating here is plain token replacement by
+ * design. A conditional feature must become a Terraform variable rendered
+ * into tfvars (as enable_object_storage does), never a conditionally emitted
+ * file — the day a feature cannot be expressed that way is the day to adopt
+ * a real template engine, not to add another special case here.
+ */
 const SPECIAL_TEMPLATES = new Set(['env.tfvars', '.github/workflows/terraform-apply.yml']);
 
 function isSpecial(rel: string): boolean {

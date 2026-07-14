@@ -99,10 +99,12 @@ describe('fromEnv', () => {
       SCW_DEFAULT_PROJECT_ID: 'pid',
       SCW_DEFAULT_ORGANIZATION_ID: 'oid',
       INFISICAL_CLIENT_ID: 'cid',
+      INFISICAL_PROJECT_ID: 'wid',
       GH_TOKEN: 'tok',
     });
     expect(partial.scaleway).toMatchObject({ accessKey: 'ak', secretKey: 'sk', projectId: 'pid' });
     expect(partial.infisical.clientId).toBe('cid');
+    expect(partial.infisical.projectId).toBe('wid');
     expect(partial.github.token).toBe('tok');
   });
 });
@@ -128,7 +130,7 @@ describe('finalizeAnswers', () => {
     expect(prod.gated).toBe(true);
     expect(prod.basicAuth).toBe(false);
     expect(prod.githubEnvironment).toBe('production');
-    expect(prod.maxScale).toBe(2);
+    expect(prod.maxScale).toBe(1);
     expect(staging.gated).toBe(false);
     expect(staging.basicAuth).toBe(true);
     expect(staging.githubEnvironment).toBe('staging');
@@ -152,6 +154,13 @@ describe('finalizeAnswers', () => {
     partial.basicAuth = false;
     const staging = finalizeAnswers(partial).environments.find((e) => e.slug === 'staging')!;
     expect(staging.basicAuth).toBe(false);
+  });
+
+  it('keeps an Infisical project ID only when one is provided', () => {
+    expect(finalizeAnswers(structuredClone(fullPartial)).infisical.projectId).toBeUndefined();
+    const partial = structuredClone(fullPartial);
+    (partial.infisical as { projectId?: string }).projectId = '  wid  ';
+    expect(finalizeAnswers(partial).infisical.projectId).toBe('wid');
   });
 
   it('throws with a clear message when a credential is missing', () => {

@@ -45,7 +45,9 @@ const ENV_DEFAULTS: Record<EnvSlug, EnvDefault> = {
     production: true,
     gated: true,
     minScale: 0,
-    maxScale: 2,
+    // Start small: one instance is enough to go live and costs the least;
+    // raising the ceiling later is a one-line prod.tfvars change.
+    maxScale: 1,
   },
 };
 
@@ -95,6 +97,8 @@ export interface Answers {
     clientId: string;
     clientSecret: string;
     projectName: string;
+    /** Existing project ID to reuse; when unset the project is found/created by name. */
+    projectId?: string;
   };
   github: {
     token: string;
@@ -224,6 +228,7 @@ export function fromEnv(env: NodeJS.ProcessEnv): PartialAnswers {
       host: env.INFISICAL_HOST,
       clientId: env.INFISICAL_CLIENT_ID,
       clientSecret: env.INFISICAL_CLIENT_SECRET,
+      projectId: env.INFISICAL_PROJECT_ID,
     },
     github: {
       token: env.GITHUB_TOKEN ?? env.GH_TOKEN,
@@ -318,6 +323,9 @@ export function finalizeAnswers(partial: PartialAnswers): Answers {
       clientId: requireString(partial.infisical.clientId, 'Infisical client ID'),
       clientSecret: requireString(partial.infisical.clientSecret, 'Infisical client secret'),
       projectName: partial.infisical.projectName?.trim() || projectName,
+      ...(partial.infisical.projectId?.trim()
+        ? { projectId: partial.infisical.projectId.trim() }
+        : {}),
     },
     github: {
       token: requireString(partial.github.token, 'GitHub token'),

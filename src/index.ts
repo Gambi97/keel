@@ -14,57 +14,158 @@ import {
   type Answers,
   type PartialAnswers,
 } from './config.js';
+import { CI_SECRET_NAMES, CI_VARIABLE_NAMES } from './contracts.js';
 import { generateProject, GenerateError } from './generate.js';
 import { confirmSummary, fillMissing } from './prompts.js';
-import { isDone, loadState, markDone, STATE_FILE, stepData, type RunState } from './state.js';
+import {
+  isDone,
+  loadState,
+  markDone,
+  STATE_FILE,
+  stepData,
+  type RunState,
+  type StepName,
+} from './state.js';
 import { cancel, intro, log, outro, renderNextSteps, renderSummary, withSpinner } from './ui.js';
 import { ensureStateBucket, validateScalewayCredentials } from './bootstrap/scaleway.js';
-import { bootstrapInfisical, login as infisicalLogin } from './bootstrap/infisical.js';
+import { bootstrapInfisical, validateInfisical } from './bootstrap/infisical.js';
 import {
+  assertRepoUsable,
   configureRepo,
   createContext,
   ensureRepo,
+  inspectRepo,
   pushRepo,
   type GitHubContext,
 } from './bootstrap/github.js';
 
-const HELP = `keel: generate and bootstrap serverless infra on Scaleway
+/**
+ * Single source of truth for the CLI surface: parseArgs consumes these specs
+ * and --help is generated from CLI_HELP, whose keys the compiler checks
+ * against this table — a flag cannot be added without help text, or vice
+ * versa. (The README's CLI reference is the one remaining manual copy.)
+ */
+const CLI_OPTIONS = {
+  name: { type: 'string' },
+  dir: { type: 'string' },
+  region: { type: 'string' },
+  'scw-access-key': { type: 'string' },
+  'scw-secret-key': { type: 'string' },
+  'scw-project-id': { type: 'string' },
+  'scw-organization-id': { type: 'string' },
+  'infisical-host': { type: 'string' },
+  'infisical-client-id': { type: 'string' },
+  'infisical-client-secret': { type: 'string' },
+  'infisical-project-id': { type: 'string' },
+  'infisical-project-name': { type: 'string' },
+  'github-token': { type: 'string' },
+  'repo-name': { type: 'string' },
+  private: { type: 'boolean' },
+  public: { type: 'boolean' },
+  environments: { type: 'string' },
+  'basic-auth': { type: 'boolean' },
+  'no-basic-auth': { type: 'boolean' },
+  'object-storage': { type: 'boolean' },
+  'no-object-storage': { type: 'boolean' },
+  'dev-min-scale': { type: 'string' },
+  'dev-max-scale': { type: 'string' },
+  'staging-min-scale': { type: 'string' },
+  'staging-max-scale': { type: 'string' },
+  'prod-min-scale': { type: 'string' },
+  'prod-max-scale': { type: 'string' },
+  config: { type: 'string' },
+  advanced: { type: 'boolean' },
+  yes: { type: 'boolean' },
+  'dry-run': { type: 'boolean' },
+  help: { type: 'boolean' },
+  version: { type: 'boolean' },
+} satisfies Record<string, { type: 'string' | 'boolean' }>;
 
-Usage:
-  npx @gambi97/keel-cli [options]
+interface HelpEntry {
+  /** Value placeholder shown next to the flag, e.g. `<name>`. */
+  hint?: string;
+  /** Description; extra lines continue in the description column. */
+  text: string;
+}
 
-Options:
-  --name <name>                  Project name (dns-safe)
-  --dir <path>                   Target directory (default: ./<name>)
-  --region <region>              fr-par | nl-ams | pl-waw (default: fr-par)
-  --scw-access-key <key>         Scaleway access key        (env SCW_ACCESS_KEY)
-  --scw-secret-key <key>         Scaleway secret key        (env SCW_SECRET_KEY)
-  --scw-project-id <id>          Scaleway project ID        (env SCW_DEFAULT_PROJECT_ID)
-  --scw-organization-id <id>     Scaleway organization ID   (env SCW_DEFAULT_ORGANIZATION_ID)
-  --infisical-host <url>         Infisical host             (env INFISICAL_HOST)
-  --infisical-client-id <id>     Machine identity client ID (env INFISICAL_CLIENT_ID)
-  --infisical-client-secret <s>  Machine identity secret    (env INFISICAL_CLIENT_SECRET)
-  --infisical-project-name <n>   Infisical project (default: project name)
-  --github-token <token>         GitHub token, repo+workflow (env GITHUB_TOKEN)
-  --repo-name <name>             GitHub repository name (default: project name)
-  --private / --public           GitHub repository visibility (default: public)
-  --environments <preset>        prod | staging+prod | dev+staging+prod
-                                 (or a list like "dev,staging,prod"; default staging+prod)
-  --no-basic-auth                Disable Basic Auth on non-production environments
-  --object-storage               Provision a per-environment Object Storage bucket
-  --no-object-storage            Do not provision Object Storage (default)
-  --dev-min-scale <n>            Dev min instances (default 0)
-  --dev-max-scale <n>            Dev max instances (default 1)
-  --staging-min-scale <n>        Staging min instances (default 0)
-  --staging-max-scale <n>        Staging max instances (default 1)
-  --prod-min-scale <n>           Prod min instances (default 0)
-  --prod-max-scale <n>           Prod max instances (default 2)
-  --config <file.json>           Read answers from a JSON config file
-  --advanced                     Also ask scaling questions interactively
-  --yes                          Accept defaults, no confirmation prompt
-  --dry-run                      Generate files locally, touch no account
-  --help, --version
-`;
+/** Help text per flag; null hides it (help/version share a closing line). */
+const CLI_HELP: Record<keyof typeof CLI_OPTIONS, HelpEntry | null> = {
+  name: { hint: '<name>', text: 'Project name (dns-safe)' },
+  dir: { hint: '<path>', text: 'Target directory (default: ./<name>)' },
+  region: { hint: '<region>', text: 'fr-par | nl-ams | pl-waw (default: fr-par)' },
+  'scw-access-key': { hint: '<key>', text: 'Scaleway access key        (env SCW_ACCESS_KEY)' },
+  'scw-secret-key': { hint: '<key>', text: 'Scaleway secret key        (env SCW_SECRET_KEY)' },
+  'scw-project-id': {
+    hint: '<id>',
+    text: 'Scaleway project ID        (env SCW_DEFAULT_PROJECT_ID)',
+  },
+  'scw-organization-id': {
+    hint: '<id>',
+    text: 'Scaleway organization ID   (env SCW_DEFAULT_ORGANIZATION_ID)',
+  },
+  'infisical-host': { hint: '<url>', text: 'Infisical host             (env INFISICAL_HOST)' },
+  'infisical-client-id': {
+    hint: '<id>',
+    text: 'Machine identity client ID (env INFISICAL_CLIENT_ID)',
+  },
+  'infisical-client-secret': {
+    hint: '<s>',
+    text: 'Machine identity secret    (env INFISICAL_CLIENT_SECRET)',
+  },
+  'infisical-project-id': {
+    hint: '<id>',
+    text: 'Existing Infisical project ID to reuse\n(env INFISICAL_PROJECT_ID; default: create by name)',
+  },
+  'infisical-project-name': { hint: '<n>', text: 'Infisical project name (default: project name)' },
+  'github-token': { hint: '<token>', text: 'GitHub token, repo+workflow (env GITHUB_TOKEN)' },
+  'repo-name': { hint: '<name>', text: 'GitHub repository name (default: project name)' },
+  private: { text: 'Create the GitHub repository as private' },
+  public: { text: 'Create the GitHub repository as public (default)' },
+  environments: {
+    hint: '<preset>',
+    text: 'prod | staging+prod | dev+staging+prod\n(or a list like "dev,staging,prod"; default staging+prod)',
+  },
+  'basic-auth': { text: 'Enable Basic Auth on non-production environments (default)' },
+  'no-basic-auth': { text: 'Disable Basic Auth on non-production environments' },
+  'object-storage': { text: 'Provision a per-environment Object Storage bucket' },
+  'no-object-storage': { text: 'Do not provision Object Storage (default)' },
+  'dev-min-scale': { hint: '<n>', text: 'Dev min instances (default 0)' },
+  'dev-max-scale': { hint: '<n>', text: 'Dev max instances (default 1)' },
+  'staging-min-scale': { hint: '<n>', text: 'Staging min instances (default 0)' },
+  'staging-max-scale': { hint: '<n>', text: 'Staging max instances (default 1)' },
+  'prod-min-scale': { hint: '<n>', text: 'Prod min instances (default 0)' },
+  'prod-max-scale': { hint: '<n>', text: 'Prod max instances (default 1)' },
+  config: { hint: '<file.json>', text: 'Read answers from a JSON config file' },
+  advanced: { text: 'Also ask scaling questions interactively' },
+  yes: { text: 'Accept defaults, no confirmation prompt' },
+  'dry-run': { text: 'Generate files locally, touch no account' },
+  help: null,
+  version: null,
+};
+
+const HELP_COLUMN = 33;
+
+function buildHelp(): string {
+  const lines = [
+    'keel: generate and bootstrap serverless infra on Scaleway',
+    '',
+    'Usage:',
+    '  npx @gambi97/keel-cli [options]',
+    '',
+    'Options:',
+  ];
+  for (const [flag, entry] of Object.entries(CLI_HELP)) {
+    if (!entry) continue;
+    const head = `  --${flag}${entry.hint ? ` ${entry.hint}` : ''}`;
+    const [first, ...rest] = entry.text.split('\n');
+    lines.push(head.padEnd(HELP_COLUMN) + first);
+    for (const continuation of rest) {
+      lines.push(' '.repeat(HELP_COLUMN) + continuation);
+    }
+  }
+  lines.push('  --help, --version');
+  return `${lines.join('\n')}\n`;
+}
 
 interface Flags {
   yes: boolean;
@@ -73,46 +174,10 @@ interface Flags {
 }
 
 function parseCli(argv: string[]): { partial: PartialAnswers; flags: Flags } {
-  const { values } = parseArgs({
-    args: argv,
-    options: {
-      name: { type: 'string' },
-      dir: { type: 'string' },
-      region: { type: 'string' },
-      'scw-access-key': { type: 'string' },
-      'scw-secret-key': { type: 'string' },
-      'scw-project-id': { type: 'string' },
-      'scw-organization-id': { type: 'string' },
-      'infisical-host': { type: 'string' },
-      'infisical-client-id': { type: 'string' },
-      'infisical-client-secret': { type: 'string' },
-      'infisical-project-name': { type: 'string' },
-      'github-token': { type: 'string' },
-      'repo-name': { type: 'string' },
-      private: { type: 'boolean' },
-      public: { type: 'boolean' },
-      environments: { type: 'string' },
-      'basic-auth': { type: 'boolean' },
-      'no-basic-auth': { type: 'boolean' },
-      'object-storage': { type: 'boolean' },
-      'no-object-storage': { type: 'boolean' },
-      'dev-min-scale': { type: 'string' },
-      'dev-max-scale': { type: 'string' },
-      'staging-min-scale': { type: 'string' },
-      'staging-max-scale': { type: 'string' },
-      'prod-min-scale': { type: 'string' },
-      'prod-max-scale': { type: 'string' },
-      config: { type: 'string' },
-      advanced: { type: 'boolean' },
-      yes: { type: 'boolean' },
-      'dry-run': { type: 'boolean' },
-      help: { type: 'boolean' },
-      version: { type: 'boolean' },
-    },
-  });
+  const { values } = parseArgs({ args: argv, options: CLI_OPTIONS });
 
   if (values.help) {
-    process.stdout.write(HELP);
+    process.stdout.write(buildHelp());
     process.exit(0);
   }
   if (values.version) {
@@ -139,6 +204,7 @@ function parseCli(argv: string[]): { partial: PartialAnswers; flags: Flags } {
       host: values['infisical-host'],
       clientId: values['infisical-client-id'],
       clientSecret: values['infisical-client-secret'],
+      projectId: values['infisical-project-id'],
       projectName: values['infisical-project-name'],
     },
     github: {
@@ -220,76 +286,125 @@ function printDryRunPlan(answers: Answers): void {
   log.info(
     [
       'Dry run: generated the repository locally. A real run would additionally:',
-      `  - Scaleway: create the Terraform state bucket "${answers.stateBucket}" (${answers.region})`,
-      `  - Infisical: create/reuse project "${answers.infisical.projectName}", environments ${envList},`,
+      `  - Scaleway: create the Terraform state bucket "${answers.stateBucket}" (${answers.region}),`,
+      '    restricted by a bucket policy to the identity behind your API key',
+      `  - Infisical: ${
+        answers.infisical.projectId
+          ? `reuse project ${answers.infisical.projectId}`
+          : `create/reuse project "${answers.infisical.projectName}"`
+      }, environments ${envList},`,
       '    seed BASIC_AUTH_USER/BASIC_AUTH_PASSWORD (non-prod) and DATABASE_URL placeholders' +
         (answers.objectStorage ? ' and S3_* placeholders' : ''),
-      `  - GitHub: create ${answers.github.repoPrivate ? 'private' : 'public'} repo "${answers.github.repoName}", push, set 6 encrypted secrets,`,
-      `    4 variables, ${ghEnvs} environments and main branch protection`,
+      `  - GitHub: create ${answers.github.repoPrivate ? 'private' : 'public'} repo "${answers.github.repoName}", push, set ${CI_SECRET_NAMES.length} encrypted secrets,`,
+      `    ${CI_VARIABLE_NAMES.length} variables, ${ghEnvs} environments and main branch protection`,
     ].join('\n'),
   );
 }
 
-async function runBootstrap(answers: Answers, state: RunState): Promise<string> {
-  const dir = answers.targetDir;
+interface StepResult {
+  /** Recorded in the state file for later steps and resumed runs. */
+  data?: Record<string, string>;
+  /** Non-fatal problem worth surfacing after the spinner. */
+  warning?: string;
+}
 
-  // All three credentials are checked before anything is created anywhere,
-  // so a bad token cannot leave a half-bootstrapped account behind.
+interface BootstrapStep {
+  name: StepName;
+  label: (answers: Answers, ctx: GitHubContext) => string;
+  skipMessage: string;
+  run: (answers: Answers, ctx: GitHubContext, state: RunState) => Promise<StepResult | void>;
+}
+
+/**
+ * The bootstrap pipeline, in order. Each step is idempotent on the provider
+ * side and recorded in the state file, so a re-run after a failure skips what
+ * is done and resumes exactly where it stopped.
+ */
+const BOOTSTRAP_STEPS: BootstrapStep[] = [
+  {
+    name: 'scaleway-bucket',
+    label: () => 'Creating Terraform state bucket',
+    skipMessage: 'Scaleway state bucket: already done, skipping.',
+    run: async (answers) => {
+      const { policyWarning } = await ensureStateBucket(answers);
+      return policyWarning ? { warning: policyWarning } : undefined;
+    },
+  },
+  {
+    name: 'infisical',
+    label: () => 'Bootstrapping Infisical project and secrets',
+    skipMessage: 'Infisical project: already done, skipping.',
+    run: async (answers) => {
+      const { projectId } = await bootstrapInfisical(answers);
+      return { data: { projectId } };
+    },
+  },
+  {
+    name: 'github-repo',
+    label: (_answers, ctx) => `Creating GitHub repository ${ctx.owner}/${ctx.repo}`,
+    skipMessage: 'GitHub repository: already done, skipping.',
+    run: async (_answers, ctx) => {
+      const { url } = await ensureRepo(ctx);
+      return { data: { url } };
+    },
+  },
+  {
+    name: 'github-push',
+    label: () => 'Pushing generated code to GitHub',
+    skipMessage: 'GitHub push: already done, skipping.',
+    run: async (answers, ctx) => {
+      pushRepo(ctx, answers.github.token, answers.targetDir);
+    },
+  },
+  {
+    name: 'github-config',
+    label: () => 'Setting GitHub secrets, variables and branch protection',
+    skipMessage: 'GitHub configuration: already done, skipping.',
+    run: async (answers, ctx, state) => {
+      // Recorded by the infisical step (this run or a resumed one).
+      await configureRepo(ctx, answers, stepData(state, 'infisical', 'projectId') as string);
+    },
+  },
+];
+
+async function runBootstrap(
+  answers: Answers,
+  state: RunState,
+  options: { preValidated: boolean },
+): Promise<string> {
   let ctx!: GitHubContext;
-  await withSpinner('Validating Scaleway, Infisical and GitHub credentials', async () => {
-    await validateScalewayCredentials(answers);
-    await infisicalLogin(answers);
-    ctx = await createContext(answers);
-  });
-
-  if (!isDone(state, 'scaleway-bucket')) {
-    await withSpinner('Creating Terraform state bucket', () => ensureStateBucket(answers));
-    markDone(dir, state, 'scaleway-bucket');
+  if (options.preValidated) {
+    // Interactive runs validated each provider inline while prompting; only
+    // the GitHub context (octokit + owner) needs to be rebuilt here.
+    ctx = await createContext(answers.github);
   } else {
-    log.info('Scaleway state bucket: already done, skipping.');
-  }
-
-  let infisicalProjectId = stepData(state, 'infisical', 'projectId');
-  if (!infisicalProjectId) {
-    const result = await withSpinner('Bootstrapping Infisical project and secrets', () =>
-      bootstrapInfisical(answers),
-    );
-    infisicalProjectId = result.projectId;
-    markDone(dir, state, 'infisical', { projectId: infisicalProjectId });
-  } else {
-    log.info('Infisical project: already done, skipping.');
-  }
-
-  let repoUrl = stepData(state, 'github-repo', 'url');
-  if (!repoUrl) {
-    const repo = await withSpinner(`Creating GitHub repository ${ctx.owner}/${ctx.repo}`, () =>
-      ensureRepo(ctx),
-    );
-    repoUrl = repo.url;
-    markDone(dir, state, 'github-repo', { url: repoUrl });
-  } else {
-    log.info('GitHub repository: already done, skipping.');
-  }
-
-  if (!isDone(state, 'github-push')) {
-    await withSpinner('Pushing generated code to GitHub', async () => {
-      pushRepo(ctx, answers.github.token, dir);
+    // All three credentials are checked before anything is created anywhere,
+    // so a bad token cannot leave a half-bootstrapped account behind.
+    await withSpinner('Validating Scaleway, Infisical and GitHub credentials', async () => {
+      await validateScalewayCredentials(answers.scaleway);
+      await validateInfisical(answers.infisical);
+      ctx = await createContext(answers.github);
+      // A repo with commits would make the push fail after the bucket and the
+      // Infisical project were already created: fail here instead. Skipped on
+      // resume, where the previous run's push is the reason it is non-empty.
+      if (!isDone(state, 'github-push')) {
+        const { state: repoState } = await inspectRepo(ctx);
+        assertRepoUsable(ctx, repoState);
+      }
     });
-    markDone(dir, state, 'github-push');
-  } else {
-    log.info('GitHub push: already done, skipping.');
   }
 
-  if (!isDone(state, 'github-config')) {
-    await withSpinner('Setting GitHub secrets, variables and branch protection', () =>
-      configureRepo(ctx, answers, infisicalProjectId as string),
-    );
-    markDone(dir, state, 'github-config');
-  } else {
-    log.info('GitHub configuration: already done, skipping.');
+  for (const step of BOOTSTRAP_STEPS) {
+    if (isDone(state, step.name)) {
+      log.info(step.skipMessage);
+      continue;
+    }
+    const result = await withSpinner(step.label(answers, ctx), () => step.run(answers, ctx, state));
+    markDone(answers.targetDir, state, step.name, result?.data);
+    if (result?.warning) log.warn(result.warning);
   }
 
-  return repoUrl;
+  return stepData(state, 'github-repo', 'url') as string;
 }
 
 async function main(): Promise<void> {
@@ -301,7 +416,7 @@ async function main(): Promise<void> {
   const interactive = process.stdin.isTTY && !flags.yes;
   let collected = partial;
   if (interactive) {
-    collected = await fillMissing(partial, { advanced: flags.advanced });
+    collected = await fillMissing(partial, { advanced: flags.advanced, dryRun: flags.dryRun });
   } else if (!flags.dryRun) {
     const missing = missingRequired(partial);
     if (missing.length > 0) {
@@ -356,7 +471,7 @@ async function main(): Promise<void> {
     return;
   }
 
-  const repoUrl = await runBootstrap(answers, state);
+  const repoUrl = await runBootstrap(answers, state, { preValidated: interactive });
   outro(
     renderNextSteps(
       answers,

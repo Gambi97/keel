@@ -28,6 +28,14 @@ provisioned by Terraform, deployed by GitHub Actions, with secrets in
 Docker image, keel gives it a place to run. You answer a few questions, push
 to `main`, and the infrastructure is live.
 
+**keel is a starting point, not a control plane.** It runs once to lay the
+foundation and hand you a repository you fully own. From then on, day-2 work —
+scaling, new environments, custom domains, rotating secrets — happens in that
+repository: edit a tfvars line, open a PR, merge. keel does not stay in the
+loop, has nothing to update, and never manages your infrastructure after the
+first setup. If you outgrow the generated layout, it is plain Terraform you
+can take anywhere.
+
 - **Near-free to start.** Compute and database scale to zero; an idle project
   costs cents per month, with no expiring trial.
 - **Scales with your product.** Pick your environments (production only, or
@@ -47,10 +55,13 @@ GitHub (see [Prerequisites](#prerequisites) for how to get each one).
 npx @gambi97/keel-cli
 ```
 
-The CLI asks for a project name, region, repository name and visibility, picks
-up `SCW_*` / `INFISICAL_*` / `GITHUB_TOKEN` from your environment as defaults,
-then shows a **complete summary of what it will create and where**. Nothing is
-touched before you confirm. When it finishes, push to `main` (or merge the
+The CLI asks for a project name, region and environments, then walks one
+provider at a time — GitHub, Infisical, Scaleway — verifying each set of
+credentials with read-only calls the moment you enter it (a bad token or a
+non-empty repository is reported immediately, and only that answer is asked
+again). It picks up `SCW_*` / `INFISICAL_*` / `GITHUB_TOKEN` from your
+environment as defaults, then shows a **complete summary of what it will
+create and where**. Nothing is touched before you confirm. When it finishes, push to `main` (or merge the
 first PR) and the pipeline provisions the infrastructure.
 
 Non-interactive and dry-run:
@@ -155,7 +166,7 @@ local tooling or production credentials.
 | Where        | What                                                                                                                                                                                                                                                   |
 | ------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
 | Your machine | The generated repo: Terraform, workflows, README, initial git commit                                                                                                                                                                                   |
-| Scaleway     | One Object Storage bucket for Terraform state (versioned, with native state locking)                                                                                                                                                                   |
+| Scaleway     | One Object Storage bucket for Terraform state (versioned, with native state locking, restricted by a bucket policy to the identity behind your API key)                                                                                                |
 | GitHub       | Repository (public or private) pushed to `main`; encrypted Actions secrets; Actions variables; one deployment environment per selected environment (`production` gated by manual approval); branch protection on `main`                                |
 | Infisical    | A project with one environment per selected environment, seeded with `BASIC_AUTH_USER` / `BASIC_AUTH_PASSWORD` (non-production, random password), a `DATABASE_URL` placeholder per environment, and `S3_*` placeholders when Object Storage is enabled |
 
@@ -283,10 +294,18 @@ creating anything**.
   plan, production applies need manual approval.
 - Terraform state lives in a private, versioned bucket with S3-native state
   locking (`use_lockfile`), so concurrent applies cannot corrupt it.
+- The state bucket is **restricted by a bucket policy** to the identity that
+  owns the API key you give keel — the same identity CI authenticates with,
+  so the pipeline keeps working. Terraform state contains the generated
+  credentials (`DATABASE_URL`, `S3_*`), so no other principal in the project —
+  including the app's own credentials — can read it. Note that this also
+  hides the bucket from other console users; manage or remove the policy with
+  that same API key if you need to open it up.
 - The app connects to its database with a **dedicated least-privilege IAM
   credential** (read/write on that database, nothing else), not with your
   main API key. Object Storage, when enabled, gets its own separate dedicated
-  credential the same way.
+  credential that can only use Object Storage (and, thanks to the bucket
+  policy above, cannot read the Terraform state).
 - A weekly drift-detection plan opens an issue when the real infrastructure
   no longer matches the code.
 
@@ -328,6 +347,17 @@ No. The CLI bootstraps via APIs; Terraform runs inside GitHub Actions.
 Yes. The CLI asks for the name and the visibility; default is public (the
 infra holds no secrets), or choose private interactively or with `--private`.
 
+**Can I point keel at an existing repository?**
+Only if it has no commits. keel pushes a brand-new history, so a repository
+that already has commits (even just a README from the GitHub UI) would reject
+the push; the CLI checks this up front and asks for another name. The easiest
+path is to let keel create the repository for you.
+
+**Can I reuse an existing Infisical project?**
+Yes: pass its project ID (`--infisical-project-id` or interactively). The CLI
+verifies the machine identity can access it before anything is created. Leave
+it empty and keel creates a project named after your app instead.
+
 **Why is the container not created on the first apply?**
 A Serverless Container needs an image, and none exists yet. Registry and
 database are created immediately; the container is gated on
@@ -343,9 +373,10 @@ You choose at creation: production only, staging + production (default), or
 dev + staging + production — interactively or with `--environments`
 (e.g. `--environments prod` or `--environments dev,staging,prod`). Production
 is always gated by a manual approval; non-production environments enable Basic
-Auth by default. To add one to an existing repo later: add a `<env>.tfvars`,
-an Infisical environment, a matrix entry in the plan/drift workflows, and a
-chained job in `terraform-apply.yml`.
+Auth by default. To add one to an existing repo later: add a `<env>.tfvars`
+(the plan and drift workflows discover environments from the tfvars files at
+the repo root automatically), an Infisical environment with the same slug, and
+a chained job in `terraform-apply.yml`.
 
 **Can I store files, not just rows?**
 Yes, opt in with `--object-storage` (or answer yes interactively). Each
@@ -366,7 +397,9 @@ off by default — many apps only need the database.
 --infisical-host <url>         or env INFISICAL_HOST (default: https://app.infisical.com)
 --infisical-client-id <id>     or env INFISICAL_CLIENT_ID
 --infisical-client-secret <s>  or env INFISICAL_CLIENT_SECRET
---infisical-project-name <n>   Infisical project (default: project name)
+--infisical-project-id <id>    Existing Infisical project ID to reuse
+                               (or env INFISICAL_PROJECT_ID; default: create by name)
+--infisical-project-name <n>   Infisical project name (default: project name)
 --github-token <token>         or env GITHUB_TOKEN / GH_TOKEN (scopes: repo, workflow)
 --repo-name <name>             GitHub repository name (default: project name)
 --private / --public           Repository visibility (default: public)
@@ -374,10 +407,11 @@ off by default — many apps only need the database.
                                (or a list like "dev,staging,prod"; default staging+prod)
 --object-storage               Provision a per-environment Object Storage bucket
 --no-object-storage            Do not provision Object Storage (default)
+--basic-auth                   Enable Basic Auth on non-production environments (default)
 --no-basic-auth                Disable Basic Auth on non-production environments
 --dev-min-scale <n>            Default 0        --dev-max-scale <n>       Default 1
 --staging-min-scale <n>        Default 0        --staging-max-scale <n>   Default 1
---prod-min-scale <n>           Default 0        --prod-max-scale <n>      Default 2
+--prod-min-scale <n>           Default 0        --prod-max-scale <n>      Default 1
 --config <file.json>           Load answers from a JSON file
 --advanced                     Also ask scaling questions interactively
 --yes                          Accept defaults, skip the confirmation prompt

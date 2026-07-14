@@ -29,13 +29,31 @@ env:
   TF_IN_AUTOMATION: "true"
 
 jobs:
+  discover:
+    name: discover environments
+    runs-on: ubuntu-latest
+    outputs:
+      environments: ${{ steps.list.outputs.environments }}
+    steps:
+      - uses: actions/checkout@v4
+
+      # Every <env>.tfvars at the repo root is an environment: adding one to
+      # the drift matrix is just adding its tfvars file, no workflow edit.
+      - name: List environments from tfvars files
+        id: list
+        run: |
+          environments=$(ls *.tfvars | sed 's/\.tfvars$//' \
+            | jq --raw-input --slurp --compact-output 'split("\n") | map(select(length > 0))')
+          echo "environments=$environments" >> "$GITHUB_OUTPUT"
+
   drift:
     name: drift (${{ matrix.environment }})
+    needs: discover
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
       matrix:
-        environment: __ENV_MATRIX__
+        environment: ${{ fromJSON(needs.discover.outputs.environments) }}
     steps:
       - uses: actions/checkout@v4
 

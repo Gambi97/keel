@@ -1,8 +1,19 @@
 import { randomBytes } from 'node:crypto';
 
 import type { Answers } from '../config.js';
+import { S3_SECRET_KEYS } from '../contracts.js';
 
-export class InfisicalError extends Error {}
+/** Which input a validation failure points at, so prompts can re-ask just that. */
+export type InfisicalErrorField = 'credentials' | 'project';
+
+export class InfisicalError extends Error {
+  constructor(
+    message: string,
+    readonly field: InfisicalErrorField = 'credentials',
+  ) {
+    super(message);
+  }
+}
 
 interface InfisicalEnvironment {
   name: string;
@@ -38,8 +49,10 @@ async function api<T>(
   return { status: response.status, data };
 }
 
-export async function login(answers: Answers): Promise<string> {
-  const { host, clientId, clientSecret } = answers.infisical;
+export async function login(
+  infisical: Pick<Answers['infisical'], 'host' | 'clientId' | 'clientSecret'>,
+): Promise<string> {
+  const { host, clientId, clientSecret } = infisical;
   const { status, data } = await api<{ accessToken?: string; message?: string }>(
     host,
     '/api/v1/auth/universal-auth/login',
@@ -54,18 +67,31 @@ export async function login(answers: Answers): Promise<string> {
   return data.accessToken;
 }
 
-async function findProject(
-  host: string,
-  token: string,
-  name: string,
-): Promise<InfisicalProject | undefined> {
+async function listProjects(host: string, token: string): Promise<InfisicalProject[]> {
   const { status, data } = await api<{ workspaces?: InfisicalProject[] }>(
     host,
     '/api/v1/workspace',
     { token },
   );
-  if (status !== 200) return undefined;
-  return data.workspaces?.find((w) => w.name === name);
+  if (status !== 200) return [];
+  return data.workspaces ?? [];
+}
+
+async function findProject(
+  host: string,
+  token: string,
+  name: string,
+): Promise<InfisicalProject | undefined> {
+  return (await listProjects(host, token)).find((w) => w.name === name);
+}
+
+/** Look an existing project up by ID among those the identity can access. */
+export async function findProjectById(
+  host: string,
+  token: string,
+  id: string,
+): Promise<InfisicalProject | undefined> {
+  return (await listProjects(host, token)).find((w) => w.id === id);
 }
 
 async function createProject(host: string, token: string, name: string): Promise<InfisicalProject> {
@@ -138,24 +164,48 @@ export interface InfisicalBootstrapResult {
   createdProject: boolean;
 }
 
-const S3_PLACEHOLDER_KEYS = [
-  'S3_BUCKET',
-  'S3_ENDPOINT',
-  'S3_REGION',
-  'S3_ACCESS_KEY',
-  'S3_SECRET_KEY',
-];
+function inaccessibleProject(projectId: string): InfisicalError {
+  return new InfisicalError(
+    `Infisical project "${projectId}" was not found or the machine identity has no access to it. ` +
+      'Check the project ID and that the identity is a member of the project.',
+    'project',
+  );
+}
+
+/**
+ * Read-only validation: Universal Auth login works and, when a project ID was
+ * given, that project is accessible. Returns the project name when found.
+ */
+export async function validateInfisical(
+  infisical: Pick<Answers['infisical'], 'host' | 'clientId' | 'clientSecret' | 'projectId'>,
+): Promise<{ projectName?: string }> {
+  const token = await login(infisical);
+  if (infisical.projectId) {
+    const project = await findProjectById(infisical.host, token, infisical.projectId);
+    if (!project) throw inaccessibleProject(infisical.projectId);
+    return { projectName: project.name };
+  }
+  return {};
+}
 
 /** Create/reuse the project, ensure every environment, seed placeholder secrets. */
 export async function bootstrapInfisical(answers: Answers): Promise<InfisicalBootstrapResult> {
-  const { host, projectName } = answers.infisical;
-  const token = await login(answers);
+  const { host, projectName, projectId } = answers.infisical;
+  const token = await login(answers.infisical);
 
   let createdProject = false;
-  let project = await findProject(host, token, projectName);
-  if (!project) {
-    project = await createProject(host, token, projectName);
-    createdProject = true;
+  let project: InfisicalProject | undefined;
+  if (projectId) {
+    // An explicit ID is never created implicitly: fail loudly if unreachable.
+    project = await findProjectById(host, token, projectId);
+    if (!project) throw inaccessibleProject(projectId);
+  } else {
+    // Find-by-name keeps re-runs idempotent even without a recorded ID.
+    project = await findProject(host, token, projectName);
+    if (!project) {
+      project = await createProject(host, token, projectName);
+      createdProject = true;
+    }
   }
 
   for (const env of answers.environments) {
@@ -179,7 +229,7 @@ export async function bootstrapInfisical(answers: Answers): Promise<InfisicalBoo
     }
     await seedSecret(host, token, project.id, env.slug, 'DATABASE_URL', placeholder);
     if (answers.objectStorage) {
-      for (const key of S3_PLACEHOLDER_KEYS) {
+      for (const key of S3_SECRET_KEYS) {
         await seedSecret(host, token, project.id, env.slug, key, placeholder);
       }
     }
