@@ -163,12 +163,12 @@ local tooling or production credentials.
 
 **Phase A: bootstrap (the CLI, via APIs, after your confirmation)**
 
-| Where        | What                                                                                                                                                                                                                                                   |
-| ------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| Your machine | The generated repo: Terraform, workflows, README, initial git commit                                                                                                                                                                                   |
-| Scaleway     | One Object Storage bucket for Terraform state (versioned, with native state locking, restricted by a bucket policy to the identity behind your API key)                                                                                                |
-| GitHub       | Repository (public or private) pushed to `main`; encrypted Actions secrets; Actions variables; one deployment environment per selected environment (`production` gated by manual approval); branch protection on `main`                                |
-| Infisical    | A project with one environment per selected environment, seeded with `BASIC_AUTH_USER` / `BASIC_AUTH_PASSWORD` (non-production, random password), a `DATABASE_URL` placeholder per environment, and `S3_*` placeholders when Object Storage is enabled |
+| Where        | What                                                                                                                                                                                                                                                              |
+| ------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Your machine | The generated repo: Terraform, workflows, README, initial git commit                                                                                                                                                                                              |
+| Scaleway     | One Object Storage bucket for Terraform state (versioned, with native state locking, restricted by a bucket policy to the identity behind your API key)                                                                                                           |
+| GitHub       | Repository (public or private) pushed to `main`; encrypted Actions secrets; Actions variables; one deployment environment per selected environment (`production` gated by manual approval); branch protection on `main`                                           |
+| Infisical    | A project with one environment per selected environment, seeded with `BASIC_AUTH_USER` / `BASIC_AUTH_PASSWORD` (non-production, random password), `DATABASE_URL` / `APP_URL` placeholders per environment, and `S3_*` placeholders when Object Storage is enabled |
 
 **Phase B: first deploy (Terraform in GitHub Actions, on push to `main`)**
 
@@ -192,6 +192,7 @@ my-app/
 │   ├── terraform-plan.yml       # PR: fmt + validate + plan (every environment)
 │   ├── terraform-apply.yml      # main: apply each env in order; production gated
 │   └── terraform-drift.yml      # weekly: read-only plan, opens an issue on drift
+├── .keel/manifest.json          # committed record: keel version, contract version, options
 ├── versions.tf · providers.tf · backend.tf
 ├── backend.hcl.example          # state bucket coordinates (backend.hcl is git-ignored)
 ├── variables.tf · main.tf · outputs.tf
@@ -203,15 +204,16 @@ Environments are separated with **Terraform workspaces**: same code, one
 independent state per environment in one bucket, differences confined to the
 per-environment `<env>.tfvars` files.
 
-| Data                                | Lives in                 | Why                                                                  |
-| ----------------------------------- | ------------------------ | -------------------------------------------------------------------- |
-| Scaleway API keys                   | GitHub encrypted secrets | CI needs them to run Terraform                                       |
-| Infisical machine identity          | GitHub encrypted secrets | Lets Terraform read app secrets at plan/apply                        |
-| Basic Auth user/password            | Infisical (non-prod)     | App secret, injected into the container, rotatable                   |
-| Database connection string          | Infisical (each env)     | Complete, ready-to-use value synced by the pipeline after each apply |
-| Object Storage coordinates (opt-in) | Infisical (each env)     | `S3_*` values synced by the pipeline after each apply                |
-| Bucket, region, Infisical project   | GitHub variables         | Non-sensitive wiring, editable in one place                          |
-| Project name, scaling, image        | Committed tfvars         | Reviewable configuration, no secrets                                 |
+| Data                                | Lives in                 | Why                                                                                  |
+| ----------------------------------- | ------------------------ | ------------------------------------------------------------------------------------ |
+| Scaleway API keys                   | GitHub encrypted secrets | CI needs them to run Terraform                                                       |
+| Infisical machine identity          | GitHub encrypted secrets | Lets Terraform read app secrets at plan/apply                                        |
+| Basic Auth user/password            | Infisical (non-prod)     | App secret, injected into the container, rotatable                                   |
+| Database connection string          | Infisical (each env)     | Complete, ready-to-use value synced by the pipeline after each apply                 |
+| App public URL (`APP_URL`)          | Infisical (each env)     | Synced by the pipeline once a container exists; for links, OAuth callbacks, webhooks |
+| Object Storage coordinates (opt-in) | Infisical (each env)     | `S3_*` values synced by the pipeline after each apply                                |
+| Bucket, region, Infisical project   | GitHub variables         | Non-sensitive wiring, editable in one place                                          |
+| Project name, scaling, image        | Committed tfvars         | Reviewable configuration, no secrets                                                 |
 
 ## After the bootstrap
 
@@ -377,6 +379,15 @@ Auth by default. To add one to an existing repo later: add a `<env>.tfvars`
 (the plan and drift workflows discover environments from the tfvars files at
 the repo root automatically), an Infisical environment with the same slug, and
 a chained job in `terraform-apply.yml`.
+
+**Can I extend the generated repo with my own Terraform?**
+Yes, and additions never edit generated files: drop a new `.tf` file at the
+repo root (Terraform merges all root files), put per-env values in the
+existing tfvars, and expose an output named `infisical_secrets_<name>` if your
+module produces secrets the app should read — the pipeline collects every
+output matching that prefix and syncs it to Infisical automatically. The
+committed `.keel/manifest.json` records the contract version your repo was
+generated with.
 
 **Can I store files, not just rows?**
 Yes, opt in with `--object-storage` (or answer yes interactively). Each

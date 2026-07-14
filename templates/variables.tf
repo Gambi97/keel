@@ -46,6 +46,11 @@ variable "min_scale" {
   description = "Minimum number of container instances."
   type        = number
   default     = 0
+
+  validation {
+    condition     = var.min_scale <= var.max_scale
+    error_message = "min_scale cannot exceed max_scale."
+  }
 }
 
 variable "max_scale" {

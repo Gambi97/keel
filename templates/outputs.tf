@@ -24,13 +24,22 @@ output "object_bucket_name" {
   value       = module.app_stack.object_bucket_name
 }
 
-# The complete set of secrets the pipeline pushes to Infisical after each apply:
-# always DATABASE_URL, plus the S3_* coordinates when Object Storage is enabled.
+# The secrets the pipeline pushes to Infisical after each apply: always
+# DATABASE_URL and APP_URL, plus the S3_* coordinates when Object Storage is
+# enabled. A module added to this repo can contribute its own secrets by
+# exposing an output named "infisical_secrets_<name>" (a map of string): the
+# pipeline collects every output matching that prefix, so extending never
+# requires editing this file.
 output "infisical_secrets" {
   description = "Secrets synced to Infisical after each apply."
   sensitive   = true
   value = merge(
-    { DATABASE_URL = module.app_stack.database_url },
+    {
+      DATABASE_URL = module.app_stack.database_url
+      # Public URL of the app; null until a container image is deployed (the
+      # pipeline skips null values and syncs it on the first apply after).
+      APP_URL = module.app_stack.container_url
+    },
     var.enable_object_storage ? {
       S3_BUCKET     = module.app_stack.object_bucket_name
       S3_ENDPOINT   = module.app_stack.object_bucket_endpoint

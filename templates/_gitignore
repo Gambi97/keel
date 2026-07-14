@@ -19,7 +19,7 @@ override.tf.json
 .env
 .env.*
 
-# Bootstrap resume file
+# Bootstrap resume file (machine-local; .keel/manifest.json IS committed)
 .keel.json
 
 # Editors / OS

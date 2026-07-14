@@ -2,7 +2,6 @@
 import { readFileSync } from 'node:fs';
 import { spawnSync } from 'node:child_process';
 import { parseArgs } from 'node:util';
-import { fileURLToPath } from 'node:url';
 
 import {
   ConfigError,
@@ -14,8 +13,9 @@ import {
   type Answers,
   type PartialAnswers,
 } from './config.js';
-import { CI_SECRET_NAMES, CI_VARIABLE_NAMES } from './contracts.js';
+import { CI_SECRET_NAMES, CI_VARIABLE_NAMES, resourceName } from './contracts.js';
 import { generateProject, GenerateError } from './generate.js';
+import { toolVersion } from './meta.js';
 import { confirmSummary, fillMissing } from './prompts.js';
 import {
   isDone,
@@ -259,17 +259,6 @@ function normalizeConfigFile(raw: unknown): PartialAnswers {
   });
 }
 
-function toolVersion(): string {
-  try {
-    const pkg = JSON.parse(
-      readFileSync(fileURLToPath(new URL('../package.json', import.meta.url)), 'utf8'),
-    ) as { version: string };
-    return pkg.version;
-  } catch {
-    return '0.0.0';
-  }
-}
-
 function checkEnvironment(): void {
   const [major] = process.versions.node.split('.');
   if (Number(major) < 18) {
@@ -293,7 +282,7 @@ function printDryRunPlan(answers: Answers): void {
           ? `reuse project ${answers.infisical.projectId}`
           : `create/reuse project "${answers.infisical.projectName}"`
       }, environments ${envList},`,
-      '    seed BASIC_AUTH_USER/BASIC_AUTH_PASSWORD (non-prod) and DATABASE_URL placeholders' +
+      '    seed BASIC_AUTH_USER/BASIC_AUTH_PASSWORD (non-prod) and DATABASE_URL/APP_URL placeholders' +
         (answers.objectStorage ? ' and S3_* placeholders' : ''),
       `  - GitHub: create ${answers.github.repoPrivate ? 'private' : 'public'} repo "${answers.github.repoName}", push, set ${CI_SECRET_NAMES.length} encrypted secrets,`,
       `    ${CI_VARIABLE_NAMES.length} variables, ${ghEnvs} environments and main branch protection`,
@@ -476,7 +465,7 @@ async function main(): Promise<void> {
     renderNextSteps(
       answers,
       repoUrl,
-      `rg.${answers.region}.scw.cloud/${answers.projectName}-${answers.environments[0]!.slug}`,
+      `rg.${answers.region}.scw.cloud/${resourceName(answers.projectName, answers.environments[0]!.slug)}`,
     ),
   );
 }

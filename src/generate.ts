@@ -12,9 +12,35 @@ import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 import type { Answers } from './config.js';
+import { CONTRACT_VERSION } from './contracts.js';
+import { toolVersion } from './meta.js';
 import { STATE_FILE } from './state.js';
 
 export class GenerateError extends Error {}
+
+/**
+ * Machine-readable record of how the repository was generated. Unlike the
+ * git-ignored .keel.json resume file, the manifest is committed: future
+ * tooling that extends a generated repo (e.g. `keel add`) reads it from a
+ * fresh clone to know which contract it is docking onto.
+ */
+export const MANIFEST_FILE = '.keel/manifest.json';
+
+function renderManifest(answers: Answers): string {
+  const manifest = {
+    keelVersion: toolVersion(),
+    contractVersion: CONTRACT_VERSION,
+    generatedAt: new Date().toISOString(),
+    projectName: answers.projectName,
+    region: answers.region,
+    environments: answers.environments.map((e) => e.slug),
+    options: {
+      objectStorage: answers.objectStorage,
+      basicAuth: answers.basicAuth,
+    },
+  };
+  return `${JSON.stringify(manifest, null, 2)}\n`;
+}
 
 /** Files whose real name would confuse npm packaging are stored renamed. */
 const RENAMES: Record<string, string> = {
@@ -174,6 +200,11 @@ export function generateProject(answers: Answers, options: GenerateOptions = {})
   const applyDestRel = '.github/workflows/terraform-apply.yml';
   writeFileSync(join(target, applyDestRel), renderApplyWorkflow(source, answers, tokens));
   written.push(applyDestRel);
+
+  // Committed manifest recording generator version, contract and options.
+  mkdirSync(join(target, '.keel'), { recursive: true });
+  writeFileSync(join(target, MANIFEST_FILE), renderManifest(answers));
+  written.push(MANIFEST_FILE);
 
   // backend.hcl (git-ignored) so local terraform runs work out of the box.
   cpSync(join(target, 'backend.hcl.example'), join(target, 'backend.hcl'));

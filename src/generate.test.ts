@@ -6,7 +6,7 @@ import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
 
 import { finalizeAnswers } from './config.js';
-import { generateProject, GenerateError } from './generate.js';
+import { generateProject, GenerateError, MANIFEST_FILE } from './generate.js';
 
 function sampleAnswers(targetDir: string) {
   return finalizeAnswers({
@@ -52,6 +52,7 @@ describe('generateProject', () => {
       '.github/workflows/terraform-apply.yml',
       '.github/workflows/terraform-drift.yml',
       '.github/scripts/sync-secrets.sh',
+      MANIFEST_FILE,
     ]) {
       expect(written, expected).toContain(expected);
       expect(existsSync(join(target, expected)), expected).toBe(true);
@@ -76,6 +77,27 @@ describe('generateProject', () => {
     expect(apply).toContain('needs: apply-staging');
     expect(apply).toContain('environment: production');
     expect(apply).toContain('./.github/scripts/sync-secrets.sh prod');
+
+    // The committed manifest records what the repo was generated with.
+    const manifest = JSON.parse(readFileSync(join(target, MANIFEST_FILE), 'utf8')) as {
+      keelVersion: string;
+      contractVersion: number;
+      projectName: string;
+      environments: string[];
+      options: { objectStorage: boolean; basicAuth: boolean };
+    };
+    expect(manifest.projectName).toBe('demo-app');
+    expect(manifest.environments).toEqual(['staging', 'prod']);
+    expect(manifest.contractVersion).toBeGreaterThanOrEqual(1);
+    expect(manifest.options.objectStorage).toBe(false);
+    // The resume file is ignored, the manifest directory must not be:
+    // check actual ignore rules, not comments.
+    const gitignoreRules = readFileSync(join(target, '.gitignore'), 'utf8')
+      .split('\n')
+      .map((l) => l.trim())
+      .filter((l) => l && !l.startsWith('#'));
+    expect(gitignoreRules).toContain('.keel.json');
+    expect(gitignoreRules.some((r) => r.startsWith('.keel/'))).toBe(false);
 
     const backend = readFileSync(join(target, 'backend.hcl.example'), 'utf8');
     expect(backend).toContain('bucket = "demo-app-tfstate"');

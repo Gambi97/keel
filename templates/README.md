@@ -49,8 +49,8 @@ merge/push main   -> apply each environment in order; any gated environment (pro
 - After each apply, the pipeline syncs the secrets Terraform produced to
   Infisical for that environment: a ready-to-use Postgres `DATABASE_URL`
   (whose credential is a dedicated IAM application that can only read/write
-  the database, not your main API key) and, when Object Storage is enabled,
-  the `S3_*` coordinates.
+  the database, not your main API key), the app's public `APP_URL` and, when
+  Object Storage is enabled, the `S3_*` coordinates.
 - State is locked during applies (S3-native locking, `use_lockfile`), so
   concurrent runs cannot corrupt it.
 - A scheduled **drift detection** workflow (Monday 06:00 UTC, or manual via
@@ -84,6 +84,7 @@ merge/push main   -> apply each environment in order; any gated environment (pro
    | Variable | Where | Notes |
    |---|---|---|
    | `DATABASE_URL` | every environment | Complete connection string, auto-updated by the pipeline after each apply. No action needed |
+   | `APP_URL` | every environment | Public URL of the app, auto-updated by the pipeline once a container exists. Useful for links, OAuth callbacks, webhooks |
    | `BASIC_AUTH_USER` / `BASIC_AUTH_PASSWORD` | non-production | The app must enforce these when `BASIC_AUTH_ENABLED=true` |
    | `S3_BUCKET` / `S3_ENDPOINT` / `S3_REGION` / `S3_ACCESS_KEY` / `S3_SECRET_KEY` | every environment (if Object Storage enabled) | Auto-updated by the pipeline after each apply |
 
@@ -124,6 +125,26 @@ environment enables it is the `enable_basic_auth` flag in its `<env>.tfvars`.
 - **Pin provider versions**: after any local `terraform init`, commit the
   generated `.terraform.lock.hcl` so CI resolves the exact same provider
   builds on every run.
+
+## Extending this repo with your own module
+
+The layout is designed so additions never edit generated files:
+
+1. Put your Terraform in a **new file at the repo root** (e.g. `jobs.tf`,
+   optionally with a `modules/<name>/` directory) — Terraform merges all root
+   `.tf` files automatically. Reach the app stack only through its outputs,
+   never into its internals.
+2. Per-environment configuration goes into the existing `<env>.tfvars` files
+   (append new variables; declare them in your own `.tf` file).
+3. If your module produces secrets the app should read, expose them as an
+   output named `infisical_secrets_<name>` (a map of string, marked
+   `sensitive`). The pipeline collects every output matching that prefix and
+   syncs it to Infisical after each apply — no edit to `outputs.tf` or the
+   workflows required.
+
+`.keel/manifest.json` (committed) records the keel version, the contract
+version and the generation options this repo was created with, so tooling and
+future you know exactly what it is built on.
 
 ## Running Terraform locally (optional)
 

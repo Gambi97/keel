@@ -1,7 +1,7 @@
 import { randomBytes } from 'node:crypto';
 
 import type { Answers } from '../config.js';
-import { S3_SECRET_KEYS } from '../contracts.js';
+import { BASE_SYNCED_KEYS, BASIC_AUTH_SECRET_KEYS, S3_SECRET_KEYS } from '../contracts.js';
 
 /** Which input a validation failure points at, so prompts can re-ask just that. */
 export type InfisicalErrorField = 'credentials' | 'project';
@@ -217,17 +217,20 @@ export async function bootstrapInfisical(answers: Answers): Promise<InfisicalBoo
   const placeholder = 'placeholder-updated-by-pipeline-after-first-apply';
   for (const env of answers.environments) {
     if (env.basicAuth) {
-      await seedSecret(host, token, project.id, env.slug, 'BASIC_AUTH_USER', env.slug);
+      const [userKey, passwordKey] = BASIC_AUTH_SECRET_KEYS;
+      await seedSecret(host, token, project.id, env.slug, userKey, env.slug);
       await seedSecret(
         host,
         token,
         project.id,
         env.slug,
-        'BASIC_AUTH_PASSWORD',
+        passwordKey,
         randomBytes(18).toString('base64url'),
       );
     }
-    await seedSecret(host, token, project.id, env.slug, 'DATABASE_URL', placeholder);
+    for (const key of BASE_SYNCED_KEYS) {
+      await seedSecret(host, token, project.id, env.slug, key, placeholder);
+    }
     if (answers.objectStorage) {
       for (const key of S3_SECRET_KEYS) {
         await seedSecret(host, token, project.id, env.slug, key, placeholder);

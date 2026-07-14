@@ -284,6 +284,13 @@ export function resolveEnvironments(
   return slugs.map((slug) => {
     const def = ENV_DEFAULTS[slug];
     const ov = overrides[slug] ?? {};
+    const minScale = validateScale(ov.minScale ?? def.minScale, `${slug} min scale`);
+    const maxScale = validateScale(ov.maxScale ?? def.maxScale, `${slug} max scale`);
+    if (minScale > maxScale) {
+      throw new ConfigError(
+        `Invalid ${slug} scaling: min scale (${minScale}) cannot exceed max scale (${maxScale}).`,
+      );
+    }
     return {
       slug,
       displayName: def.displayName,
@@ -292,8 +299,8 @@ export function resolveEnvironments(
       gated: def.gated,
       // Basic Auth is a non-production safety net; production is never gated by it.
       basicAuth: def.production ? false : basicAuth,
-      minScale: validateScale(ov.minScale ?? def.minScale, `${slug} min scale`),
-      maxScale: validateScale(ov.maxScale ?? def.maxScale, `${slug} max scale`),
+      minScale,
+      maxScale,
     };
   });
 }

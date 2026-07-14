@@ -54,6 +54,16 @@ describe('validateRegion', () => {
 });
 
 describe('validateScale', () => {
+  it('rejects min scale above max scale', () => {
+    expect(() =>
+      finalizeAnswers({ ...fullPartial, scaling: { prod: { minScale: 5, maxScale: 1 } } }),
+    ).toThrow(ConfigError);
+    // Equal min and max is valid (fixed-size deployment).
+    expect(() =>
+      finalizeAnswers({ ...fullPartial, scaling: { prod: { minScale: 2, maxScale: 2 } } }),
+    ).not.toThrow();
+  });
+
   it('accepts integers in range', () => {
     expect(validateScale(0, 'x')).toBe(0);
     expect(validateScale('5', 'x')).toBe(5);

@@ -1,4 +1,7 @@
 locals {
+  # <project>-<env>: the naming convention every per-environment resource
+  # shares with the CLI (which builds registry hints from it) — do not change
+  # one side without the other; contracts.test.ts pins them together.
   name = "${var.project_name}-${var.environment}"
 }
 
