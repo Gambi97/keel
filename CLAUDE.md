@@ -22,6 +22,17 @@ Feature placement policy:
 - **External SaaS integration** (auth/WorkOS, email providers) → a documented recipe; the app reads coordinates from Infisical env vars. Not keel's code.
 - **Day-2 additions** (cron/jobs, etc.) → future `keel add` modules docking onto the additive contract; demand-driven, don't build ahead of demand.
 
+### DDD applied to infrastructure (how to think here)
+
+Strategic DDD applies to infra; tactical DDD stays in application code — don't force entities/repositories onto HCL. The operative mappings in this repo:
+
+- **Published language**: `contracts.ts` is the published language between two bounded contexts (bootstrap CLI ↔ generated repo/CI); the additive `infisical_secrets_*` convention is an open host service future modules conform to.
+- **Anti-corruption layer**: SaaS recipes (WorkOS, email providers) keep vendor specifics behind a standard seam (env vars, OIDC, SMTP); vendors stay swappable, keel stays clean.
+- **Boundaries follow reason-for-change, on two axes**: the domain reason (bounded context → ownership, IAM perimeter) and the lifecycle (change rate → state split). Never split by resource type, and splitting by org chart alone is a known trap. keel's one-workspace-per-environment = same model, multiple deployment contexts.
+- **Consistency boundary**: `modules/app_stack` is the aggregate analogue — reach it only via its outputs, never into its internals; tfvars are value objects.
+- **Monolith-first is DDD orthodoxy**: one bounded context until persistent language/invariant conflicts force a split; premature splitting makes every change a cross-context negotiation.
+- **The platform is the domain**: keel's domain experts are developers shipping products; the gratitude test is asking domain experts whether the model serves the domain. Ubiquitous language: keel (the spine laid first), moorings (what docks onto it), paved road, contract.
+
 ## Commands
 
 ```sh
