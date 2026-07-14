@@ -43,7 +43,7 @@ You need Node >= 18.17, git, and credentials for Scaleway, Infisical and
 GitHub (see [Prerequisites](#prerequisites) for how to get each one).
 
 ```sh
-npx keel-cli
+npx @gambi97/keel-cli
 ```
 
 The CLI asks for a project name, region, repository name and visibility, picks
@@ -56,10 +56,10 @@ Non-interactive and dry-run:
 
 ```sh
 # scripts / CI: every question has a flag
-npx keel-cli --yes --name my-app --region fr-par --private
+npx @gambi97/keel-cli --yes --name my-app --region fr-par --private
 
 # preview: generates the repo locally, touches no account
-npx keel-cli --dry-run --yes --name my-app
+npx @gambi97/keel-cli --dry-run --yes --name my-app
 ```
 
 See the full [CLI reference](#cli-reference) for all flags, or pass
@@ -134,7 +134,7 @@ Actions encrypted secrets, because that is what CI needs to boot.
 
 ```mermaid
 flowchart TD
-    You([You: npx keel-cli]) -->|APIs, after you confirm| CLI{{CLI bootstrap}}
+    You([You: npx @gambi97/keel-cli]) -->|APIs, after you confirm| CLI{{CLI bootstrap}}
     CLI -->|creates state bucket| SCW[(Scaleway<br/>Object Storage)]
     CLI -->|creates repo, secrets,<br/>variables, branch rules| GH[GitHub repo]
     CLI -->|creates project, envs,<br/>placeholder secrets| INF[Infisical]
