@@ -58,5 +58,3 @@ Key mechanics that span multiple files:
 ## Releasing
 
 Publishing runs only in CI: `npm version patch|minor` (creates the version commit + `vX.Y.Z` tag), then `git push --follow-tags`. The Release workflow refuses tag/package.json mismatches and skips already-published versions. Changes that alter the generated output's behavior or contracts are a **minor** bump, not a patch.
-
-
