@@ -30,7 +30,7 @@ import {
 const HELP = `keel: generate and bootstrap serverless infra on Scaleway
 
 Usage:
-  npx keel-cli [options]
+  npx @gambi97/keel-cli [options]
 
 Options:
   --name <name>                  Project name (dns-safe)
