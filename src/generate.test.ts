@@ -70,11 +70,17 @@ describe('generateProject', () => {
     expect(tfvars).toMatch(/enable_basic_auth\s+= true/);
     expect(tfvars).toMatch(/enable_object_storage\s+= false/);
 
-    // The apply workflow has one chained job per environment.
+    // The apply workflow: non-prod deploys on merge to main, prod on a tag.
     const apply = readFileSync(join(target, '.github/workflows/terraform-apply.yml'), 'utf8');
     expect(apply).toContain('apply-staging:');
     expect(apply).toContain('apply-prod:');
-    expect(apply).toContain('needs: apply-staging');
+    expect(apply).toContain('branches: [main]');
+    expect(apply).toContain('tags: ["v*.*.*"]');
+    // staging runs on merge, prod runs only on a version tag.
+    expect(apply).toContain("if: github.ref == 'refs/heads/main'");
+    expect(apply).toContain("if: startsWith(github.ref, 'refs/tags/')");
+    // prod is promoted by the tag, not chained after staging.
+    expect(apply).not.toContain('needs: apply-staging');
     expect(apply).toContain('environment: production');
     expect(apply).toContain('./.github/scripts/sync-secrets.sh prod');
 

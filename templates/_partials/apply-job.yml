@@ -1,8 +1,9 @@
   apply-__ENV_SLUG__:
     name: apply (__ENV_SLUG__)
     runs-on: ubuntu-latest
-__NEEDS_LINE__    # The GitHub environment may carry a required-reviewer rule, gating this job.
-    environment: __GH_ENVIRONMENT__
+    # Non-prod runs on merge to main; prod runs only on a version tag.
+    if: __APPLY_IF__
+__NEEDS_LINE__    environment: __GH_ENVIRONMENT__
     steps:
       - uses: actions/checkout@v4
 

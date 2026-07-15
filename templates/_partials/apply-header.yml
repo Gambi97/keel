@@ -1,13 +1,19 @@
 name: Terraform apply
 
+# Non-production environments deploy on every merge to main; production is
+# promoted by pushing a version tag (vX.Y.Z), so a merge never touches prod.
+# Tag-based promotion is the free, git-native gate (no paid environment rule):
+# the tag lives in the repo, is auditable, and rolling back is re-tagging.
 on:
   push:
-    branches: [main]
+__APPLY_TRIGGERS__
 
 permissions:
   contents: read
 
 concurrency:
+  # Serialize all applies against the shared state bucket; a tag deploy and a
+  # main deploy never run at the same time.
   group: terraform-apply
   cancel-in-progress: false
 

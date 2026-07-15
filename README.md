@@ -62,7 +62,8 @@ non-empty repository is reported immediately, and only that answer is asked
 again). It picks up `SCW_*` / `INFISICAL_*` / `GITHUB_TOKEN` from your
 environment as defaults, then shows a **complete summary of what it will
 create and where**. Nothing is touched before you confirm. When it finishes, push to `main` (or merge the
-first PR) and the pipeline provisions the infrastructure.
+first PR) and the pipeline provisions the non-production infrastructure; a
+version tag (`vX.Y.Z`) promotes to production.
 
 Non-interactive and dry-run:
 
@@ -150,14 +151,16 @@ flowchart TD
     CLI -->|creates state bucket| SCW[(Scaleway<br/>Object Storage)]
     CLI -->|creates repo, secrets,<br/>variables, branch rules| GH[GitHub repo]
     CLI -->|creates project, envs,<br/>placeholder secrets| INF[Infisical]
-    GH -->|push to main| ACT[GitHub Actions]
-    ACT -->|terraform apply| PROD[Scaleway:<br/>Container + SQL + Registry]
+    GH -->|merge to main| ACT[GitHub Actions]
+    GH -->|tag vX.Y.Z| ACT
+    ACT -->|apply non-prod / prod| PROD[Scaleway:<br/>Container + SQL + Registry]
     INF -.->|app secrets at runtime| PROD
 ```
 
 The CLI does the **bootstrap**, in seconds, on your machine. The first
 `terraform apply` runs **in CI** on the first push to `main`, so nobody needs
-local tooling or production credentials.
+local tooling or production credentials. Non-production environments deploy on
+every merge; production is promoted by pushing a version tag.
 
 ## What gets created, and when
 
@@ -167,7 +170,7 @@ local tooling or production credentials.
 | ------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | Your machine | The generated repo: Terraform, workflows, README, initial git commit                                                                                                                                                                                              |
 | Scaleway     | One Object Storage bucket for Terraform state (versioned, with native state locking, restricted by a bucket policy to the identity behind your API key)                                                                                                           |
-| GitHub       | Repository (public or private) pushed to `main`; encrypted Actions secrets; Actions variables; one deployment environment per selected environment (`production` gated by manual approval); branch protection on `main`                                           |
+| GitHub       | Repository (public or private) pushed to `main`; encrypted Actions secrets; Actions variables; one deployment environment per selected environment (`production` promoted by a version tag); branch protection on `main`                                          |
 | Infisical    | A project with one environment per selected environment, seeded with `BASIC_AUTH_USER` / `BASIC_AUTH_PASSWORD` (non-production, random password), `DATABASE_URL` / `APP_URL` placeholders per environment, and `S3_*` placeholders when Object Storage is enabled |
 
 **Phase B: first deploy (Terraform in GitHub Actions, on push to `main`)**
@@ -190,7 +193,7 @@ my-app/
 ├── README.md                    # operating manual for the repo
 ├── .github/workflows/
 │   ├── terraform-plan.yml       # PR: fmt + validate + plan (every environment)
-│   ├── terraform-apply.yml      # main: apply each env in order; production gated
+│   ├── terraform-apply.yml      # merge to main: apply non-prod; tag vX.Y.Z: apply prod
 │   └── terraform-drift.yml      # weekly: read-only plan, opens an issue on drift
 ├── .keel/manifest.json          # committed record: keel version, contract version, options
 ├── versions.tf · providers.tf · backend.tf
@@ -222,8 +225,8 @@ day-2 work (scaling, rotating secrets, custom domains, troubleshooting). The
 short version of the first deploy:
 
 1. **Push to `main`** (or merge a PR): the pipeline provisions registry and
-   databases (and an Object Storage bucket, if enabled). Approve the
-   `production` gate when prompted.
+   databases for the non-production environments (and an Object Storage bucket,
+   if enabled). Production waits for a version tag (step 5).
 2. **Build and push your app image** to the registry endpoint from the apply
    output (replace `<env>` with your target environment):
    ```sh
@@ -234,9 +237,12 @@ short version of the first deploy:
 3. **Set `container_image`** in the tfvars and open a PR: the next apply
    creates the containers.
 4. **Replace the placeholder secrets** in Infisical with real values. The app
-   reads `DATABASE_URL`, `BASIC_AUTH_*` and (if enabled) `S3_*` from its
-   environment; non-production environments also receive `BASIC_AUTH_ENABLED=true`
-   and enforce it.
+   reads `DATABASE_URL`, `APP_URL`, `BASIC_AUTH_*` and (if enabled) `S3_*` from
+   its environment; non-production environments also receive
+   `BASIC_AUTH_ENABLED=true` and enforce it.
+5. **Release to production**: push a version tag — `git tag v1.0.0 && git push
+--tags` — and the production apply runs against that commit. A merge to
+   `main` never deploys production.
 
 ## Prerequisites
 
@@ -293,7 +299,9 @@ creating anything**.
 - Actions secrets are encrypted client-side (libsodium sealed box) before
   upload.
 - `main` is protected: force pushes and deletion blocked, PRs need a green
-  plan, production applies need manual approval.
+  plan. Production never deploys from a merge — it is gated behind a version
+  tag, a free promotion control that works on any GitHub plan (required-reviewer
+  rules need a paid plan on private repos) and lives auditably in the repo.
 - Terraform state lives in a private, versioned bucket with S3-native state
   locking (`use_lockfile`), so concurrent applies cannot corrupt it.
 - The state bucket is **restricted by a bucket policy** to the identity that
@@ -373,12 +381,13 @@ endpoints. Credentials live in Infisical, the container gets
 **Which environments do I get, and can I change them?**
 You choose at creation: production only, staging + production (default), or
 dev + staging + production — interactively or with `--environments`
-(e.g. `--environments prod` or `--environments dev,staging,prod`). Production
-is always gated by a manual approval; non-production environments enable Basic
-Auth by default. To add one to an existing repo later: add a `<env>.tfvars`
-(the plan and drift workflows discover environments from the tfvars files at
-the repo root automatically), an Infisical environment with the same slug, and
-a chained job in `terraform-apply.yml`.
+(e.g. `--environments prod` or `--environments dev,staging,prod`). Non-production
+environments deploy on merge to `main` and enable Basic Auth by default;
+production is promoted by pushing a version tag (`vX.Y.Z`), never by a merge. To
+add a non-production environment later: add a `<env>.tfvars` (the plan and drift
+workflows discover environments from the tfvars files at the repo root
+automatically), an Infisical environment with the same slug, and a `main`-gated
+job in `terraform-apply.yml`.
 
 **Can I extend the generated repo with my own Terraform?**
 Yes, and additions never edit generated files: drop a new `.tf` file at the

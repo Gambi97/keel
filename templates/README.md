@@ -40,12 +40,18 @@ Credentials live in GitHub Actions encrypted secrets (CI) and in Infisical
 
 ```
 PR to main        -> terraform fmt + validate + plan (every environment), shown as PR checks
-merge/push main   -> apply each environment in order; any gated environment (production) waits for manual approval
+merge/push main   -> apply non-production environments in order (dev, staging)
+tag vX.Y.Z        -> apply production (the commit the tag points at)
 ```
 
 - `main` is protected: PRs need a green plan, force pushes are blocked.
-- Environments apply in order, each `needs:` the previous one; a gated
-  environment (production) waits for approval on its GitHub Environment.
+- Non-production environments apply on every merge to `main`, in order, each
+  `needs:` the previous one — a continuously-deployed staging.
+- **Production is promoted by a version tag**, not by a merge: push a tag like
+  `v1.2.0` and the production apply runs against that commit. The tag is the
+  gate — it works on any GitHub plan (unlike required-reviewer rules, which
+  need a paid plan on private repos), lives in the repo, and rolling back is
+  re-tagging an earlier commit. Cut one with `git tag v1.2.0 && git push --tags`.
 - After each apply, the pipeline syncs the secrets Terraform produced to
   Infisical for that environment: a ready-to-use Postgres `DATABASE_URL`
   (whose credential is a dedicated IAM application that can only read/write
@@ -60,9 +66,10 @@ merge/push main   -> apply each environment in order; any gated environment (pro
 ## First deploy
 
 1. **Merge or push to `main`.** The first pipeline run creates registry and
-   databases (and the Object Storage bucket, if enabled). The Serverless
-   Container is intentionally skipped until an image exists (`container_image`
-   is empty), so the first apply is green.
+   databases for the non-production environments (and the Object Storage
+   bucket, if enabled). The Serverless Container is intentionally skipped until
+   an image exists (`container_image` is empty), so the first apply is green.
+   Production waits for a version tag (step 5).
 
 2. **Build and push the app image** (any Dockerfile, listening on port 8080
    by default), replacing `<env>` with your target environment (e.g. staging):
@@ -90,7 +97,19 @@ merge/push main   -> apply each environment in order; any gated environment (pro
 
    Every secret in the Infisical environment is injected into the container
    as a secret environment variable, so adding an app secret is: add it in
-   Infisical, re-run the apply (any merge to `main`).
+   Infisical, re-run the apply (a merge to `main` for non-prod, a new tag for
+   production).
+
+5. **Release to production**: once staging looks good, cut a version tag on the
+   commit you want live and push it:
+
+   ```sh
+   git tag v1.0.0
+   git push --tags
+   ```
+
+   The production apply runs against that commit. Nothing reaches production
+   without a tag, so a merge to `main` can never deploy it by accident.
 
 ## Basic Auth on non-production environments
 
@@ -115,13 +134,13 @@ environment enables it is the `enable_basic_auth` flag in its `<env>.tfvars`.
   secrets (repo Settings > Secrets and variables > Actions).
 - **Add a custom domain**: add a `scaleway_container_domain` resource in
   `modules/app_stack` pointing at the container, plus your DNS record.
-- **Add an environment**: add a `<env>.tfvars` at the repo root (the plan and
-  drift workflows discover environments from the tfvars files automatically),
-  create an Infisical environment with the same slug, and add a job in
-  `.github/workflows/terraform-apply.yml` (mirror an existing one and set its
-  `needs:` to chain after the previous environment). Note: the new `plan
-  (<env>)` check becomes required on `main` only after you add it in the
-  branch-protection settings.
+- **Add a non-production environment**: add a `<env>.tfvars` at the repo root
+  (the plan and drift workflows discover environments from the tfvars files
+  automatically), create an Infisical environment with the same slug, and add a
+  job in `.github/workflows/terraform-apply.yml` — mirror an existing non-prod
+  job (`if: github.ref == 'refs/heads/main'`) and set its `needs:` to chain
+  after the previous one. Note: the new `plan (<env>)` check becomes required on
+  `main` only after you add it in the branch-protection settings.
 - **Pin provider versions**: after any local `terraform init`, commit the
   generated `.terraform.lock.hcl` so CI resolves the exact same provider
   builds on every run.

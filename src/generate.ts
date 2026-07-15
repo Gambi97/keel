@@ -127,24 +127,51 @@ function renderApplyWorkflow(
   answers: Answers,
   globalTokens: Record<string, string>,
 ): string {
+  // Non-production environments deploy on merge to main (chained in order);
+  // production is promoted by a version tag. The triggers and the per-job
+  // guards are assembled from which environments exist, so a prod-only repo
+  // has no branch trigger and a prod-less selection has no tag trigger.
+  const nonProd = answers.environments.filter((env) => !env.production);
+  const prod = answers.environments.find((env) => env.production);
+
+  const triggers: string[] = [];
+  if (nonProd.length > 0) triggers.push('    branches: [main]');
+  if (prod) triggers.push('    tags: ["v*.*.*"]');
+
   const header = renderContent(
     readFileSync(join(source, '_partials/apply-header.yml'), 'utf8'),
-    globalTokens,
+    { ...globalTokens, __APPLY_TRIGGERS__: triggers.join('\n') },
     '_partials/apply-header.yml',
   );
+
   const jobTemplate = readFileSync(join(source, '_partials/apply-job.yml'), 'utf8');
-  const jobs = answers.environments.map((env, i) => {
-    const previous = answers.environments[i - 1];
-    return renderContent(
+  const renderJob = (
+    env: Answers['environments'][number],
+    applyIf: string,
+    needs: string,
+  ): string =>
+    renderContent(
       jobTemplate,
       {
         __ENV_SLUG__: env.slug,
         __GH_ENVIRONMENT__: env.githubEnvironment,
-        __NEEDS_LINE__: previous ? `    needs: apply-${previous.slug}\n` : '',
+        __APPLY_IF__: applyIf,
+        __NEEDS_LINE__: needs,
       },
       '_partials/apply-job.yml',
     );
+
+  const jobs = nonProd.map((env, i) => {
+    const previous = nonProd[i - 1];
+    return renderJob(
+      env,
+      "github.ref == 'refs/heads/main'",
+      previous ? `    needs: apply-${previous.slug}\n` : '',
+    );
   });
+  if (prod) {
+    jobs.push(renderJob(prod, "startsWith(github.ref, 'refs/tags/')", ''));
+  }
   return header + jobs.join('\n');
 }
 

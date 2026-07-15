@@ -93,9 +93,10 @@ export function renderNextSteps(
     `     registry created by the first pipeline run (${containerUrlHint}).`,
     `  2. Replace the placeholder secrets in Infisical (${answers.infisical.host})`,
     `     project "${answers.infisical.projectName}" with real values.`,
-    `  3. Push to main (or merge a PR) to trigger the first terraform apply:`,
+    `  3. Push to main (or merge a PR) to deploy the non-production environments:`,
     `     ${repoUrl}/actions`,
     `  4. Set container_image in ${answers.environments.map((e) => `${e.slug}.tfvars`).join(' / ')} once an image exists.`,
+    `  5. Release to production with a version tag: git tag v1.0.0 && git push --tags`,
     '',
     `Repository: ${repoUrl}`,
   ].join('\n');
