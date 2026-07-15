@@ -9,8 +9,14 @@ export type StepName =
 export interface RunState {
   version: 1;
   projectName: string;
-  /** Steps completed so far, with any data later steps need (never secrets). */
-  steps: Partial<Record<StepName, { data?: Record<string, string> }>>;
+  /**
+   * Steps completed so far, with any data later steps need (never secrets).
+   * A step recorded with a warning finished in degraded form (e.g. the bucket
+   * policy could not be applied): it is NOT done — a resume re-runs it, which
+   * is safe because every step is find-or-create idempotent, and gives the
+   * degraded part a chance to heal.
+   */
+  steps: Partial<Record<StepName, { data?: Record<string, string>; warning?: string }>>;
 }
 
 export function loadState(targetDir: string, projectName: string): RunState {
@@ -31,7 +37,13 @@ export function saveState(targetDir: string, state: RunState): void {
 }
 
 export function isDone(state: RunState, step: StepName): boolean {
-  return state.steps[step] !== undefined;
+  const record = state.steps[step];
+  return record !== undefined && record.warning === undefined;
+}
+
+/** The warning a previous run recorded for this step, if it degraded. */
+export function stepWarning(state: RunState, step: StepName): string | undefined {
+  return state.steps[step]?.warning;
 }
 
 export function markDone(
@@ -39,8 +51,9 @@ export function markDone(
   state: RunState,
   step: StepName,
   data?: Record<string, string>,
+  warning?: string,
 ): void {
-  state.steps[step] = data ? { data } : {};
+  state.steps[step] = { ...(data ? { data } : {}), ...(warning ? { warning } : {}) };
   saveState(targetDir, state);
 }
 

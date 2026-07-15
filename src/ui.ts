@@ -68,7 +68,7 @@ export function renderSummary(answers: Answers, dryRun: boolean): string {
   for (const env of answers.environments) {
     const flags = [
       `scale ${env.minScale}-${env.maxScale}`,
-      env.gated ? 'manual approval' : 'auto-deploy',
+      env.production ? 'deploys on version tag' : 'deploys on merge to main',
       env.basicAuth ? 'basic auth' : null,
     ]
       .filter(Boolean)

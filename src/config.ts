@@ -15,9 +15,8 @@ interface EnvDefault {
   displayName: string;
   /** GitHub deployment environment name (production keeps its full name). */
   githubEnvironment: string;
+  /** Production deploys on a version tag; everything else on merge to main. */
   production: boolean;
-  /** Whether the GitHub environment requires a manual approval before apply. */
-  gated: boolean;
   minScale: number;
   maxScale: number;
 }
@@ -27,7 +26,6 @@ const ENV_DEFAULTS: Record<EnvSlug, EnvDefault> = {
     displayName: 'Development',
     githubEnvironment: 'dev',
     production: false,
-    gated: false,
     minScale: 0,
     maxScale: 1,
   },
@@ -35,7 +33,6 @@ const ENV_DEFAULTS: Record<EnvSlug, EnvDefault> = {
     displayName: 'Staging',
     githubEnvironment: 'staging',
     production: false,
-    gated: false,
     minScale: 0,
     maxScale: 1,
   },
@@ -43,7 +40,6 @@ const ENV_DEFAULTS: Record<EnvSlug, EnvDefault> = {
     displayName: 'Production',
     githubEnvironment: 'production',
     production: true,
-    gated: true,
     minScale: 0,
     // Start small: one instance is enough to go live and costs the least;
     // raising the ceiling later is a one-line prod.tfvars change.
@@ -71,7 +67,6 @@ export interface EnvConfig {
   displayName: string;
   githubEnvironment: string;
   production: boolean;
-  gated: boolean;
   basicAuth: boolean;
   minScale: number;
   maxScale: number;
@@ -127,18 +122,37 @@ export interface KeelManifest {
   region: string;
   environments: string[];
   options: { objectStorage: boolean; basicAuth: boolean };
+  /**
+   * The GitHub repository this project was created against. Optional because
+   * manifests written before repo identity was recorded lack it; resume then
+   * falls back to the project name (the repo default).
+   */
+  github?: { repoName: string; repoPrivate: boolean };
 }
 
 /**
  * Lock a resume's configuration to what the repo was generated with. Scaling
  * is intentionally not carried: it only shapes the tfvars, which are already
  * generated on any run that has a manifest, so post-generate steps never read it.
+ *
+ * The GitHub repo identity is locked too: on resume the target repository is
+ * already decided (keel created and pushed it), so the picker must not run and
+ * must never frame the project's own — now non-empty — repo as "create a new
+ * one". Older manifests without a github block fall back to the project name,
+ * which is the repo default and the only repository the project could own. An
+ * explicit --repo-name still wins (the established flag-precedence rule).
  */
 export function hydrateConfigFromManifest(partial: PartialAnswers, manifest: KeelManifest): void {
   partial.region = manifest.region;
   partial.environments = manifest.environments;
   partial.objectStorage = manifest.options.objectStorage;
   partial.basicAuth = manifest.options.basicAuth;
+  if (!partial.github.repoName) {
+    partial.github.repoName = manifest.github?.repoName ?? manifest.projectName;
+  }
+  if (partial.github.repoPrivate === undefined && manifest.github?.repoPrivate !== undefined) {
+    partial.github.repoPrivate = manifest.github.repoPrivate;
+  }
 }
 
 /** Partial answers collected from flags, config file and environment. */
@@ -325,8 +339,7 @@ export function resolveEnvironments(
       displayName: def.displayName,
       githubEnvironment: def.githubEnvironment,
       production: def.production,
-      gated: def.gated,
-      // Basic Auth is a non-production safety net; production is never gated by it.
+      // Basic Auth is a non-production safety net; production never has it.
       basicAuth: def.production ? false : basicAuth,
       minScale,
       maxScale,

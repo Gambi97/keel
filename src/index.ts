@@ -24,6 +24,7 @@ import {
   markDone,
   STATE_FILE,
   stepData,
+  stepWarning,
   type RunState,
   type StepName,
 } from './state.js';
@@ -394,8 +395,13 @@ async function runBootstrap(
       log.info(step.skipMessage);
       continue;
     }
+    // A step that degraded with a warning last run is re-run (idempotent) so
+    // the degraded part can heal — e.g. a bucket policy that raced creation.
+    if (stepWarning(state, step.name)) {
+      log.info('Previous run finished this step with a warning — retrying it.');
+    }
     const result = await withSpinner(step.label(answers, ctx), () => step.run(answers, ctx, state));
-    markDone(answers.targetDir, state, step.name, result?.data);
+    markDone(answers.targetDir, state, step.name, result?.data, result?.warning);
     if (result?.warning) log.warn(result.warning);
   }
 

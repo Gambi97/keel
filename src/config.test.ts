@@ -74,11 +74,64 @@ describe('hydrateConfigFromManifest', () => {
       region: 'fr-par',
       environments: ['staging', 'prod'],
       options: { objectStorage: true, basicAuth: true },
+      github: { repoName: 'demo-app', repoPrivate: true },
     });
     expect(partial.region).toBe('fr-par');
     expect(partial.environments).toEqual(['staging', 'prod']);
     expect(partial.objectStorage).toBe(true);
     expect(partial.basicAuth).toBe(true);
+  });
+
+  it('locks the repository identity so the picker never runs on resume', () => {
+    const partial: PartialAnswers = { scaleway: {}, infisical: {}, github: {}, scaling: {} };
+    hydrateConfigFromManifest(partial, {
+      keelVersion: '9.9.9',
+      contractVersion: 1,
+      generatedAt: '2026-07-15T00:00:00.000Z',
+      projectName: 'demo-app',
+      region: 'fr-par',
+      environments: ['prod'],
+      options: { objectStorage: false, basicAuth: true },
+      github: { repoName: 'picked-elsewhere', repoPrivate: true },
+    });
+    expect(partial.github.repoName).toBe('picked-elsewhere');
+    expect(partial.github.repoPrivate).toBe(true);
+  });
+
+  it('falls back to the project name for manifests written before repo identity', () => {
+    const partial: PartialAnswers = { scaleway: {}, infisical: {}, github: {}, scaling: {} };
+    hydrateConfigFromManifest(partial, {
+      keelVersion: '0.3.4',
+      contractVersion: 1,
+      generatedAt: '2026-07-15T00:00:00.000Z',
+      projectName: 'aisleplanner',
+      region: 'fr-par',
+      environments: ['staging', 'prod'],
+      options: { objectStorage: false, basicAuth: true },
+    });
+    expect(partial.github.repoName).toBe('aisleplanner');
+    // Unknown from an old manifest: left for the visibility prompt / default.
+    expect(partial.github.repoPrivate).toBeUndefined();
+  });
+
+  it('never overrides an explicit --repo-name', () => {
+    const partial: PartialAnswers = {
+      scaleway: {},
+      infisical: {},
+      github: { repoName: 'from-flag' },
+      scaling: {},
+    };
+    hydrateConfigFromManifest(partial, {
+      keelVersion: '9.9.9',
+      contractVersion: 1,
+      generatedAt: '2026-07-15T00:00:00.000Z',
+      projectName: 'demo-app',
+      region: 'fr-par',
+      environments: ['prod'],
+      options: { objectStorage: false, basicAuth: true },
+      github: { repoName: 'demo-app', repoPrivate: false },
+    });
+    expect(partial.github.repoName).toBe('from-flag');
   });
 });
 
@@ -165,12 +218,13 @@ describe('finalizeAnswers', () => {
     expect(answers.environments.map((e) => e.slug)).toEqual(['staging', 'prod']);
     const staging = answers.environments.find((e) => e.slug === 'staging')!;
     const prod = answers.environments.find((e) => e.slug === 'prod')!;
-    // Production is gated and never basic-auth'd; non-prod is auto-deploy + basic auth.
-    expect(prod.gated).toBe(true);
+    // Production deploys on a version tag and is never basic-auth'd;
+    // non-prod deploys on merge to main with basic auth.
+    expect(prod.production).toBe(true);
     expect(prod.basicAuth).toBe(false);
     expect(prod.githubEnvironment).toBe('production');
     expect(prod.maxScale).toBe(1);
-    expect(staging.gated).toBe(false);
+    expect(staging.production).toBe(false);
     expect(staging.basicAuth).toBe(true);
     expect(staging.githubEnvironment).toBe('staging');
     expect(staging.maxScale).toBe(1);

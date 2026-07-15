@@ -64,6 +64,31 @@ export async function validateScalewayCredentials(
   }
 }
 
+const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+
+/**
+ * Bucket-metadata calls made right after CreateBucket can race its propagation
+ * and answer NoSuchBucket for a bucket that provably exists (we created or
+ * Head-checked it moments before). Retry exactly that error with a short
+ * backoff; anything else is a real failure and is thrown immediately.
+ */
+export async function retryWhileBucketPropagates<T>(
+  fn: () => Promise<T>,
+  attempts = 5,
+  baseDelayMs = 1000,
+): Promise<T> {
+  for (let attempt = 1; ; attempt++) {
+    try {
+      return await fn();
+    } catch (error) {
+      if ((error as { name?: string }).name !== 'NoSuchBucket' || attempt >= attempts) {
+        throw error;
+      }
+      await sleep(attempt * baseDelayMs);
+    }
+  }
+}
+
 function s3Client(answers: Answers): S3Client {
   return new S3Client({
     region: answers.region,
@@ -154,15 +179,16 @@ async function lockDownStateBucket(
     ],
   };
   try {
-    await client.send(
-      new PutBucketPolicyCommand({ Bucket: bucket, Policy: JSON.stringify(policy) }),
+    await retryWhileBucketPropagates(() =>
+      client.send(new PutBucketPolicyCommand({ Bucket: bucket, Policy: JSON.stringify(policy) })),
     );
     return undefined;
   } catch (error) {
     return (
       `Could not apply a policy to bucket "${bucket}" ` +
       `(${error instanceof Error ? error.message : String(error)}); ` +
-      'the state bucket was NOT restricted to your identity.'
+      'the state bucket was NOT restricted to your identity. ' +
+      'Re-run keel to retry this step.'
     );
   }
 }
@@ -196,11 +222,13 @@ export async function ensureStateBucket(answers: Answers): Promise<StateBucketRe
     try {
       await client.send(new CreateBucketCommand({ Bucket: bucket }));
       // Versioning protects the state history against accidental overwrites.
-      await client.send(
-        new PutBucketVersioningCommand({
-          Bucket: bucket,
-          VersioningConfiguration: { Status: 'Enabled' },
-        }),
+      await retryWhileBucketPropagates(() =>
+        client.send(
+          new PutBucketVersioningCommand({
+            Bucket: bucket,
+            VersioningConfiguration: { Status: 'Enabled' },
+          }),
+        ),
       );
       created = true;
     } catch (createError) {

@@ -38,6 +38,12 @@ function renderManifest(answers: Answers): string {
       objectStorage: answers.objectStorage,
       basicAuth: answers.basicAuth,
     },
+    // Recorded so a resume locks the repository instead of re-running the
+    // picker; see hydrateConfigFromManifest.
+    github: {
+      repoName: answers.github.repoName,
+      repoPrivate: answers.github.repoPrivate,
+    },
   };
   return `${JSON.stringify(manifest, null, 2)}\n`;
 }

@@ -29,7 +29,6 @@ export class GitHubError extends Error {
 export interface GitHubIdentity {
   octokit: Octokit;
   owner: string;
-  ownerId: number;
 }
 
 export interface GitHubContext extends GitHubIdentity {
@@ -45,18 +44,21 @@ export interface GitHubContext extends GitHubIdentity {
 export async function authenticate(token: string): Promise<GitHubIdentity> {
   // Silence Octokit's own request logging: expected non-2xx responses (a 404
   // for a repo that does not exist yet, a 401 for a bad token) are handled
-  // here and would otherwise scribble over the prompt spinner.
+  // here and would otherwise scribble over the prompt spinner. The same sink
+  // is passed at the request layer too: @octokit/request reads
+  // `request.log` (falling back to console) for deprecation notices carried
+  // in response headers, bypassing the instance logger.
+  const silentLog = { debug: () => {}, info: () => {}, warn: () => {}, error: () => {} };
   const octokit = new Octokit({
     auth: token,
-    log: { debug: () => {}, info: () => {}, warn: () => {}, error: () => {} },
+    log: silentLog,
+    request: { log: silentLog },
   });
   let login: string;
-  let ownerId: number;
   let scopes: string | undefined;
   try {
     const { data, headers } = await octokit.users.getAuthenticated();
     login = data.login;
-    ownerId = data.id;
     scopes = headers['x-oauth-scopes'];
   } catch {
     throw new GitHubError(
@@ -77,7 +79,7 @@ export async function authenticate(token: string): Promise<GitHubIdentity> {
       }
     }
   }
-  return { octokit, owner: login, ownerId };
+  return { octokit, owner: login };
 }
 
 export async function createContext(
@@ -258,11 +260,8 @@ export async function configureRepo(
     INFISICAL_HOST: answers.infisical.host,
   };
   await setVariables(ctx, variables);
-  const warnings = [
-    await configureEnvironments(ctx, answers),
-    await protectMainBranch(ctx, answers),
-  ].filter((w): w is string => w !== undefined);
-  return warnings.length > 0 ? warnings.join('\n\n') : undefined;
+  await configureEnvironments(ctx, answers);
+  return protectMainBranch(ctx, answers);
 }
 
 async function setSecrets(ctx: GitHubContext, secrets: Record<string, string>): Promise<void> {
@@ -308,46 +307,20 @@ async function setVariables(ctx: GitHubContext, variables: Record<string, string
 }
 
 /**
- * Each environment gets a GitHub deployment environment; gated ones (prod)
- * require a reviewer approval. Required reviewers need GitHub Enterprise Cloud
- * on private repositories — GitHub answers 422 there. Rather than strand the
- * bootstrap at its last step, fall back to an ungated environment and warn:
- * the environment still exists (deployments target it) but production will
- * auto-deploy on merge. Like the branch-protection miss, this degrades to a
- * warning instead of killing the run.
+ * Each environment gets a GitHub deployment environment, used by the apply
+ * workflow for deployment tracking and history. No reviewer gate is requested:
+ * production is promoted by a version tag — the tag IS the gate, free on every
+ * plan, while required reviewers would need GitHub Enterprise Cloud on private
+ * repositories and would only duplicate what the tag already enforces.
  */
-export async function configureEnvironments(
-  ctx: GitHubContext,
-  answers: Answers,
-): Promise<string | undefined> {
-  const ungated: string[] = [];
+export async function configureEnvironments(ctx: GitHubContext, answers: Answers): Promise<void> {
   for (const env of answers.environments) {
-    try {
-      await ctx.octokit.repos.createOrUpdateEnvironment({
-        owner: ctx.owner,
-        repo: ctx.repo,
-        environment_name: env.githubEnvironment,
-        ...(env.gated ? { reviewers: [{ type: 'User', id: ctx.ownerId }] } : {}),
-      });
-    } catch (error) {
-      // Only the reviewer rule can trip the plan limit; re-throw anything else
-      // (and any failure on a non-gated environment, which asked for no rule).
-      if (!env.gated || (error as { status?: number }).status !== 422) throw error;
-      await ctx.octokit.repos.createOrUpdateEnvironment({
-        owner: ctx.owner,
-        repo: ctx.repo,
-        environment_name: env.githubEnvironment,
-      });
-      ungated.push(env.githubEnvironment);
-    }
+    await ctx.octokit.repos.createOrUpdateEnvironment({
+      owner: ctx.owner,
+      repo: ctx.repo,
+      environment_name: env.githubEnvironment,
+    });
   }
-  if (ungated.length === 0) return undefined;
-  return (
-    `Created the ${ungated.join(', ')} environment(s) without the manual-approval gate: ` +
-    'required reviewers need GitHub Enterprise Cloud on private repositories, so production ' +
-    'will auto-deploy on merge to main. Make the repository public (reviewers are free there) ' +
-    'or upgrade the plan, then re-run to add the gate.'
-  );
 }
 
 /**

@@ -91,11 +91,16 @@ describe('generateProject', () => {
       projectName: string;
       environments: string[];
       options: { objectStorage: boolean; basicAuth: boolean };
+      github: { repoName: string; repoPrivate: boolean };
     };
     expect(manifest.projectName).toBe('demo-app');
     expect(manifest.environments).toEqual(['staging', 'prod']);
     expect(manifest.contractVersion).toBeGreaterThanOrEqual(1);
     expect(manifest.options.objectStorage).toBe(false);
+    // The repo identity is recorded so a resume locks it instead of re-running
+    // the picker (which would frame the project's own repo as "create new").
+    expect(manifest.github.repoName).toBe('demo-app');
+    expect(manifest.github.repoPrivate).toBe(false);
     // The resume file is ignored, the manifest directory must not be:
     // check actual ignore rules, not comments.
     const gitignoreRules = readFileSync(join(target, '.gitignore'), 'utf8')
@@ -146,6 +151,8 @@ describe('generateProject', () => {
     expect(manifest?.region).toBe('fr-par');
     expect(manifest?.environments).toEqual(['staging', 'prod']);
     expect(manifest?.options.basicAuth).toBe(true);
+    expect(manifest?.github?.repoName).toBe('demo-app');
+    expect(manifest?.github?.repoPrivate).toBe(false);
   });
 
   it('returns undefined when there is no manifest (a fresh run)', () => {

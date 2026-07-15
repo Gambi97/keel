@@ -96,7 +96,7 @@ export async function fillMissing(
   if (manifest && resuming) {
     hydrateConfigFromManifest(out, manifest);
     log.info(
-      `Resuming "${out.projectName}" — region, environments and options are locked to its .keel manifest.`,
+      `Resuming "${out.projectName}" — repository, region, environments and options are locked to its .keel manifest.`,
     );
   }
 
