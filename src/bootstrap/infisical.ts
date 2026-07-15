@@ -122,12 +122,19 @@ async function ensureEnvironment(
     `/api/v1/workspace/${project.id}/environments`,
     { method: 'POST', token, body: { name, slug } },
   );
-  // 400 usually means the environment already exists: fine for idempotency.
-  if (status !== 200 && status !== 400) {
-    throw new InfisicalError(
-      `Could not create Infisical environment "${slug}" (HTTP ${status}${data.message ? `: ${data.message}` : ''}).`,
-    );
+  if (status === 200) return;
+  // A 400 usually means the environment already exists (fine for idempotency),
+  // but it is also what plan limits and rejected slugs answer: trust the
+  // message when it says "exists", otherwise re-fetch and check for real —
+  // swallowing it blindly would surface later as a confusing seeding failure.
+  if (status === 400) {
+    if (/exist/i.test(data.message ?? '')) return;
+    const fresh = await findProjectById(host, token, project.id);
+    if (fresh?.environments?.some((e) => e.slug === slug)) return;
   }
+  throw new InfisicalError(
+    `Could not create Infisical environment "${slug}" (HTTP ${status}${data.message ? `: ${data.message}` : ''}).`,
+  );
 }
 
 async function seedSecret(
