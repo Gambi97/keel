@@ -21,16 +21,17 @@ jobs:
         run: docker build -t ghcr.io/gambi97/keel-placeholder:v1 -t ghcr.io/gambi97/keel-placeholder:latest placeholder
       - name: Smoke-test the container
         run: |
-          docker run -d --rm -p 8080:8080 -e PROJECT_NAME=smoke -e APP_ENVIRONMENT=ci --name ph ghcr.io/gambi97/keel-placeholder:v1
-          sleep 2
-          curl -fsS http://localhost:8080/healthz
-          curl -fsS http://localhost:8080/ | grep -q smoke
+          fail() { echo "--- container logs ---"; docker logs "$1" || true; exit 1; }
+          docker run -d -p 8080:8080 -e PROJECT_NAME=smoke -e APP_ENVIRONMENT=ci --name ph ghcr.io/gambi97/keel-placeholder:v1
+          sleep 3
+          curl -fsS http://localhost:8080/healthz || fail ph
+          curl -fsS http://localhost:8080/ | grep -q smoke || fail ph
           # Basic Auth contract: 401 without credentials, 200 with them.
           docker rm -f ph
-          docker run -d --rm -p 8081:8080 -e BASIC_AUTH_ENABLED=true -e BASIC_AUTH_USER=u -e BASIC_AUTH_PASSWORD=p --name ph2 ghcr.io/gambi97/keel-placeholder:v1
-          sleep 2
-          test "$(curl -s -o /dev/null -w '%{http_code}' http://localhost:8081/)" = "401"
-          curl -fsS -u u:p http://localhost:8081/ > /dev/null
+          docker run -d -p 8081:8080 -e BASIC_AUTH_ENABLED=true -e BASIC_AUTH_USER=u -e BASIC_AUTH_PASSWORD=p --name ph2 ghcr.io/gambi97/keel-placeholder:v1
+          sleep 3
+          test "$(curl -s -o /dev/null -w '%{http_code}' http://localhost:8081/)" = "401" || fail ph2
+          curl -fsS -u u:p http://localhost:8081/ > /dev/null || fail ph2
           docker rm -f ph2
       - name: Push
         run: |
