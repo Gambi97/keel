@@ -36,11 +36,18 @@ vi.mock('./state.js', () => ({
 }));
 
 // Keep the real error classes; stub only the network-touching functions.
-const gh = vi.hoisted(() => ({ inspectRepo: vi.fn(), createContext: vi.fn() }));
+const gh = vi.hoisted(() => ({
+  inspectRepo: vi.fn(),
+  createContext: vi.fn(),
+  authenticate: vi.fn(),
+  listOwnedRepos: vi.fn(),
+}));
 vi.mock('./bootstrap/github.js', async (orig) => ({
   ...(await orig<typeof import('./bootstrap/github.js')>()),
   createContext: gh.createContext,
   inspectRepo: gh.inspectRepo,
+  authenticate: gh.authenticate,
+  listOwnedRepos: gh.listOwnedRepos,
 }));
 
 const inf = vi.hoisted(() => ({ validateInfisical: vi.fn() }));
@@ -88,6 +95,8 @@ beforeEach(() => {
   answer = happyAnswer;
   gh.createContext.mockResolvedValue({ owner: 'me', repo: 'my-app' });
   gh.inspectRepo.mockResolvedValue({ state: 'not-found' });
+  gh.authenticate.mockResolvedValue({ octokit: {}, owner: 'me', ownerId: 1 });
+  gh.listOwnedRepos.mockResolvedValue([]); // no reusable repos → type a new name
   inf.validateInfisical.mockResolvedValue({});
   scw.validateScalewayCredentials.mockResolvedValue(undefined);
 });
@@ -134,6 +143,27 @@ describe('fillMissing re-prompt loop', () => {
     const tokenAsks = asked.filter((m) => m.includes('GitHub token')).length;
     expect(repoAsks).toBe(2); // asked again after the failure
     expect(tokenAsks).toBe(1); // token was fine, not re-asked
+  });
+
+  it('picks an existing empty repo from the list without asking for a name', async () => {
+    gh.listOwnedRepos.mockResolvedValue([
+      { name: 'spare-repo', private: true, empty: true },
+      { name: 'has-code', private: false, empty: false },
+    ]);
+    answer = (message: string) => {
+      if (message === 'Repository') return 'spare-repo'; // pick from the selector
+      return happyAnswer(message);
+    };
+
+    const out = await fillMissing(empty(), { advanced: false });
+
+    // The selector was shown, and no "New repository name" text prompt appeared.
+    expect(asked).toContain('Repository');
+    expect(asked.some((m) => m.includes('New repository name'))).toBe(false);
+    expect(out.github.repoName).toBe('spare-repo');
+    // Reused repo keeps its own visibility, so the question is skipped.
+    expect(out.github.repoPrivate).toBe(true);
+    expect(asked.some((m) => m.includes('visibility'))).toBe(false);
   });
 
   it('re-asks the token when GitHub rejects it', async () => {

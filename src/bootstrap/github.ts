@@ -26,22 +26,28 @@ export class GitHubError extends Error {
   }
 }
 
-export interface GitHubContext {
+export interface GitHubIdentity {
   octokit: Octokit;
   owner: string;
   ownerId: number;
+}
+
+export interface GitHubContext extends GitHubIdentity {
   repo: string;
   repoPrivate: boolean;
 }
 
-export async function createContext(
-  github: Pick<Answers['github'], 'token' | 'repoName' | 'repoPrivate'>,
-): Promise<GitHubContext> {
+/**
+ * Authenticate the token and confirm it carries the scopes keel needs. Split
+ * from createContext so the prompt can validate the token and list the user's
+ * repositories before a repository name even exists.
+ */
+export async function authenticate(token: string): Promise<GitHubIdentity> {
   // Silence Octokit's own request logging: expected non-2xx responses (a 404
   // for a repo that does not exist yet, a 401 for a bad token) are handled
   // here and would otherwise scribble over the prompt spinner.
   const octokit = new Octokit({
-    auth: github.token,
+    auth: token,
     log: { debug: () => {}, info: () => {}, warn: () => {}, error: () => {} },
   });
   let login: string;
@@ -71,13 +77,36 @@ export async function createContext(
       }
     }
   }
-  return {
-    octokit,
-    owner: login,
-    ownerId,
-    repo: github.repoName,
-    repoPrivate: github.repoPrivate,
-  };
+  return { octokit, owner: login, ownerId };
+}
+
+export async function createContext(
+  github: Pick<Answers['github'], 'token' | 'repoName' | 'repoPrivate'>,
+): Promise<GitHubContext> {
+  const identity = await authenticate(github.token);
+  return { ...identity, repo: github.repoName, repoPrivate: github.repoPrivate };
+}
+
+export interface OwnedRepo {
+  name: string;
+  private: boolean;
+  /** No content yet (GitHub reports size 0): keel can push into it. */
+  empty: boolean;
+}
+
+/**
+ * Repositories the user owns, newest first, flagged by emptiness. keel pushes a
+ * brand-new history, so only empty repos are reusable; `size === 0` is GitHub's
+ * cheap proxy for "no commits" (inspectRepo makes the authoritative call once a
+ * name is chosen). Paginated in full — the picker never silently truncates.
+ */
+export async function listOwnedRepos(octokit: Octokit): Promise<OwnedRepo[]> {
+  const repos = await octokit.paginate(octokit.repos.listForAuthenticatedUser, {
+    affiliation: 'owner',
+    sort: 'updated',
+    per_page: 100,
+  });
+  return repos.map((r) => ({ name: r.name, private: r.private, empty: r.size === 0 }));
 }
 
 export type RepoState = 'not-found' | 'empty' | 'non-empty' | 'no-push';

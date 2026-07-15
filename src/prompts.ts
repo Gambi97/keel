@@ -1,6 +1,14 @@
 import * as p from '@clack/prompts';
 
-import { createContext, GitHubError, inspectRepo, assertRepoUsable } from './bootstrap/github.js';
+import {
+  authenticate,
+  createContext,
+  type GitHubIdentity,
+  GitHubError,
+  inspectRepo,
+  assertRepoUsable,
+  listOwnedRepos,
+} from './bootstrap/github.js';
 import { InfisicalError, validateInfisical } from './bootstrap/infisical.js';
 import { ScalewayError, validateScalewayCredentials } from './bootstrap/scaleway.js';
 import {
@@ -177,24 +185,98 @@ async function askConfiguration(out: PartialAnswers, options: FillOptions): Prom
   }
 }
 
-/** GitHub block: repo + token, then verify token, scopes and repo state. */
+/**
+ * Decide the target repository once the token is known: create a new one, or
+ * reuse an existing empty repo picked from a list. keel pushes a brand-new
+ * history, so only empty repos are offered — a name typed for a new repo is
+ * still validated. Sets repoName (and, for an existing pick, its real
+ * visibility) on `out`.
+ */
+async function chooseRepo(out: PartialAnswers, identity: GitHubIdentity): Promise<void> {
+  const CREATE_NEW = ' create-new'; // sentinel: a leading space is never a valid repo name
+  const spin = p.spinner();
+  spin.start('Fetching your GitHub repositories');
+  let reusable: Awaited<ReturnType<typeof listOwnedRepos>> = [];
+  try {
+    const repos = await listOwnedRepos(identity.octokit);
+    reusable = repos.filter((r) => r.empty);
+    spin.stop(
+      reusable.length
+        ? `Found ${reusable.length} empty repositor${reusable.length === 1 ? 'y' : 'ies'} you can reuse`
+        : 'No empty repositories to reuse — keel will create a new one',
+    );
+  } catch {
+    spin.stop('Could not list repositories; you can still name a new one');
+  }
+
+  const choice = reusable.length
+    ? await ask(
+        p.select({
+          message: 'Repository',
+          initialValue: CREATE_NEW,
+          options: [
+            {
+              value: CREATE_NEW,
+              label: 'Create a new repository',
+              hint: 'keel creates it for you',
+            },
+            ...reusable.map((r) => ({
+              value: r.name,
+              label: r.name,
+              hint: `${r.private ? 'private' : 'public'}, empty — reuse it`,
+            })),
+          ],
+        }),
+      )
+    : CREATE_NEW;
+
+  if (choice !== CREATE_NEW) {
+    const picked = reusable.find((r) => r.name === choice)!;
+    out.github.repoName = picked.name;
+    out.github.repoPrivate = picked.private; // keep the repo's existing visibility
+    return;
+  }
+
+  out.github.repoName = await ask(
+    p.text({
+      message: 'New repository name',
+      initialValue: out.projectName,
+      validate: validate(validateProjectName),
+    }),
+  );
+}
+
+/** GitHub block: token first (so we can list repos), then repo choice and state. */
 async function askGitHub(out: PartialAnswers): Promise<void> {
   // When resuming a run that already pushed, the repo legitimately has
   // commits: a non-empty repo must not block the resume.
   const targetDir = out.targetDir?.trim() || out.projectName!;
   const alreadyPushed = isDone(loadState(targetDir, out.projectName!), 'github-push');
 
-  p.intro('GitHub — repository, visibility and token');
+  p.intro('GitHub — token, repository and visibility');
   for (;;) {
-    if (!out.github.repoName) {
-      out.github.repoName = await ask(
-        p.text({
-          message: 'GitHub repository name (a new empty repository works best)',
-          initialValue: out.projectName,
-          validate: validate(validateProjectName),
-        }),
-      );
+    // Token first: authenticating up front lets keel list your repositories so
+    // you can pick one instead of typing its name.
+    if (!out.github.token) {
+      out.github.token = await secret('GitHub token (scopes: repo, workflow)');
     }
+    let identity: GitHubIdentity;
+    try {
+      identity = await authenticate(out.github.token!);
+    } catch (error) {
+      if (!(error instanceof GitHubError)) throw error;
+      log.error(error.message);
+      out.github.token = undefined;
+      continue;
+    }
+
+    // New-or-existing selector. Skipped when a name is already fixed by flags,
+    // --config or a resumed run.
+    if (!out.github.repoName) {
+      await chooseRepo(out, identity);
+    }
+
+    // Visibility. An existing pick carries its own; only a new repo asks.
     if (out.github.repoPrivate === undefined) {
       out.github.repoPrivate = await ask(
         p.select({
@@ -206,9 +288,6 @@ async function askGitHub(out: PartialAnswers): Promise<void> {
           ],
         }),
       );
-    }
-    if (!out.github.token) {
-      out.github.token = await secret('GitHub token (scopes: repo, workflow)');
     }
 
     try {
@@ -234,7 +313,9 @@ async function askGitHub(out: PartialAnswers): Promise<void> {
       if (!(error instanceof GitHubError)) throw error;
       log.error(error.message);
       if (error.field === 'repo') {
+        // Bad repo choice: re-run the selector and re-derive its visibility.
         out.github.repoName = undefined;
+        out.github.repoPrivate = undefined;
       } else {
         out.github.token = undefined;
       }
