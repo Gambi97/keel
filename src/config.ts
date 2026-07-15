@@ -112,6 +112,35 @@ export interface Answers {
   environments: EnvConfig[];
 }
 
+/**
+ * Machine-readable record committed into the generated repo (`.keel/manifest.json`).
+ * On resume it is the source of truth for the configuration the repo was
+ * generated with — that config is frozen (the repo already exists), so it is
+ * read back rather than asked again. Written by generate.ts, read by both the
+ * interactive and non-interactive resume paths.
+ */
+export interface KeelManifest {
+  keelVersion: string;
+  contractVersion: number;
+  generatedAt: string;
+  projectName: string;
+  region: string;
+  environments: string[];
+  options: { objectStorage: boolean; basicAuth: boolean };
+}
+
+/**
+ * Lock a resume's configuration to what the repo was generated with. Scaling
+ * is intentionally not carried: it only shapes the tfvars, which are already
+ * generated on any run that has a manifest, so post-generate steps never read it.
+ */
+export function hydrateConfigFromManifest(partial: PartialAnswers, manifest: KeelManifest): void {
+  partial.region = manifest.region;
+  partial.environments = manifest.environments;
+  partial.objectStorage = manifest.options.objectStorage;
+  partial.basicAuth = manifest.options.basicAuth;
+}
+
 /** Partial answers collected from flags, config file and environment. */
 export type PartialAnswers = {
   projectName?: string;

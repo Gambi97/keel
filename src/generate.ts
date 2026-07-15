@@ -11,7 +11,7 @@ import {
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-import type { Answers } from './config.js';
+import type { Answers, KeelManifest } from './config.js';
 import { CONTRACT_VERSION } from './contracts.js';
 import { toolVersion } from './meta.js';
 import { STATE_FILE } from './state.js';
@@ -27,7 +27,7 @@ export class GenerateError extends Error {}
 export const MANIFEST_FILE = '.keel/manifest.json';
 
 function renderManifest(answers: Answers): string {
-  const manifest = {
+  const manifest: KeelManifest = {
     keelVersion: toolVersion(),
     contractVersion: CONTRACT_VERSION,
     generatedAt: new Date().toISOString(),
@@ -40,6 +40,30 @@ function renderManifest(answers: Answers): string {
     },
   };
   return `${JSON.stringify(manifest, null, 2)}\n`;
+}
+
+/**
+ * Read the committed manifest from a target directory, or undefined when there
+ * is none (a fresh run). Used by the resume paths to lock configuration to
+ * what the repo was generated with instead of asking for it again.
+ */
+export function readManifest(targetDir: string): KeelManifest | undefined {
+  try {
+    const raw = readFileSync(join(targetDir, MANIFEST_FILE), 'utf8');
+    const m = JSON.parse(raw) as KeelManifest;
+    if (
+      typeof m.projectName === 'string' &&
+      typeof m.region === 'string' &&
+      Array.isArray(m.environments) &&
+      typeof m.options?.objectStorage === 'boolean' &&
+      typeof m.options?.basicAuth === 'boolean'
+    ) {
+      return m;
+    }
+  } catch {
+    // No manifest or unreadable/invalid: treat as a fresh run.
+  }
+  return undefined;
 }
 
 /** Files whose real name would confuse npm packaging are stored renamed. */

@@ -4,6 +4,7 @@ import {
   ConfigError,
   finalizeAnswers,
   fromEnv,
+  hydrateConfigFromManifest,
   mergeAnswers,
   missingRequired,
   normalizeEnvSlugs,
@@ -12,6 +13,7 @@ import {
   validateProjectName,
   validateRegion,
   validateScale,
+  type PartialAnswers,
 } from './config.js';
 
 const fullPartial = {
@@ -50,6 +52,33 @@ describe('validateRegion', () => {
 
   it('rejects unknown regions', () => {
     expect(() => validateRegion('us-east-1')).toThrow(ConfigError);
+  });
+});
+
+describe('hydrateConfigFromManifest', () => {
+  it('locks region, environments and options from the manifest on resume', () => {
+    const partial: PartialAnswers = {
+      // Values a resume run might have wrongly defaulted/passed:
+      region: 'nl-ams',
+      objectStorage: false,
+      scaleway: {},
+      infisical: {},
+      github: {},
+      scaling: {},
+    };
+    hydrateConfigFromManifest(partial, {
+      keelVersion: '9.9.9',
+      contractVersion: 1,
+      generatedAt: '2026-07-15T00:00:00.000Z',
+      projectName: 'demo-app',
+      region: 'fr-par',
+      environments: ['staging', 'prod'],
+      options: { objectStorage: true, basicAuth: true },
+    });
+    expect(partial.region).toBe('fr-par');
+    expect(partial.environments).toEqual(['staging', 'prod']);
+    expect(partial.objectStorage).toBe(true);
+    expect(partial.basicAuth).toBe(true);
   });
 });
 

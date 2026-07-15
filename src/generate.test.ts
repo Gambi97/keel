@@ -6,7 +6,7 @@ import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
 
 import { finalizeAnswers } from './config.js';
-import { generateProject, GenerateError, MANIFEST_FILE } from './generate.js';
+import { generateProject, GenerateError, MANIFEST_FILE, readManifest } from './generate.js';
 
 function sampleAnswers(targetDir: string) {
   return finalizeAnswers({
@@ -129,5 +129,21 @@ describe('generateProject', () => {
     dir = mkdtempSync(join(tmpdir(), 'keel-clash-'));
     writeFileSync(join(dir, 'existing.txt'), 'hello');
     expect(() => generateProject(sampleAnswers(dir), { git: false })).toThrow(GenerateError);
+  });
+
+  it('reads back the manifest it wrote (resume source of truth)', () => {
+    dir = mkdtempSync(join(tmpdir(), 'keel-manifest-'));
+    const target = join(dir, 'demo-app');
+    generateProject(sampleAnswers(target), { git: false });
+    const manifest = readManifest(target);
+    expect(manifest?.projectName).toBe('demo-app');
+    expect(manifest?.region).toBe('fr-par');
+    expect(manifest?.environments).toEqual(['staging', 'prod']);
+    expect(manifest?.options.basicAuth).toBe(true);
+  });
+
+  it('returns undefined when there is no manifest (a fresh run)', () => {
+    dir = mkdtempSync(join(tmpdir(), 'keel-nomanifest-'));
+    expect(readManifest(dir)).toBeUndefined();
   });
 });

@@ -18,6 +18,7 @@ import {
   DEFAULT_REGION,
   ENV_PRESETS,
   envDefaultScale,
+  hydrateConfigFromManifest,
   type EnvSlug,
   REGIONS,
   type PartialAnswers,
@@ -25,6 +26,7 @@ import {
   validateScale,
   validateUrl,
 } from './config.js';
+import { readManifest } from './generate.js';
 import { isDone, loadState } from './state.js';
 import { log } from './ui.js';
 
@@ -83,6 +85,21 @@ export async function fillMissing(
   const out = structuredClone(partial);
 
   await askProjectName(out);
+
+  // Resuming an existing project: its configuration is frozen (the repo is
+  // already generated with it), so lock it from the committed manifest instead
+  // of asking again. Credentials are never persisted, so the provider blocks
+  // still run — set SCW_*/INFISICAL_*/GITHUB_TOKEN in the env to skip typing.
+  const resumeDir = out.targetDir?.trim() || out.projectName!;
+  const manifest = readManifest(resumeDir);
+  const resuming = manifest !== undefined && manifest.projectName === out.projectName;
+  if (manifest && resuming) {
+    hydrateConfigFromManifest(out, manifest);
+    log.info(
+      `Resuming "${out.projectName}" — region, environments and options are locked to its .keel manifest.`,
+    );
+  }
+
   // Each block opens with a "┌ <Provider>" section corner and closes with a
   // "└ <Provider> connected — …" line, so every question flows inside its own
   // section and the next one opens only when the previous is verified.
@@ -93,7 +110,10 @@ export async function fillMissing(
   }
   // Configuration comes last: with the accounts verified, these are the only
   // real choices left. In a dry run it is all that is asked after the name.
-  await askConfiguration(out, options);
+  // On resume it is skipped entirely — the manifest already fixed it.
+  if (!resuming) {
+    await askConfiguration(out, options);
+  }
 
   return out;
 }

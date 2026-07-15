@@ -7,6 +7,7 @@ import {
   ConfigError,
   finalizeAnswers,
   fromEnv,
+  hydrateConfigFromManifest,
   mergeAnswers,
   missingRequired,
   parseEnvironments,
@@ -14,7 +15,7 @@ import {
   type PartialAnswers,
 } from './config.js';
 import { CI_SECRET_NAMES, CI_VARIABLE_NAMES, resourceName } from './contracts.js';
-import { generateProject, GenerateError } from './generate.js';
+import { generateProject, GenerateError, readManifest } from './generate.js';
 import { toolVersion } from './meta.js';
 import { confirmSummary, fillMissing } from './prompts.js';
 import {
@@ -412,6 +413,16 @@ async function main(): Promise<void> {
   if (interactive) {
     collected = await fillMissing(partial, { advanced: flags.advanced, dryRun: flags.dryRun });
   } else if (!flags.dryRun) {
+    // Resuming non-interactively: lock configuration to the committed manifest
+    // so flags/defaults can't silently diverge from the generated repo (e.g. a
+    // resume without --object-storage must not flip it off). Same source of
+    // truth as the interactive path.
+    const resumeDir = partial.targetDir?.trim() || partial.projectName;
+    const manifest = resumeDir ? readManifest(resumeDir) : undefined;
+    if (manifest && manifest.projectName === partial.projectName) {
+      hydrateConfigFromManifest(partial, manifest);
+      log.info(`Resuming "${manifest.projectName}" — configuration locked to its .keel manifest.`);
+    }
     const missing = missingRequired(partial);
     if (missing.length > 0) {
       cancel(`Non-interactive run is missing required values:\n  - ${missing.join('\n  - ')}`);
