@@ -3,3 +3,7 @@ dist/
 coverage/
 *.tgz
 .DS_Store
+
+# Claude Code (local working files, not part of the project)
+CLAUDE.md
+.claude/
