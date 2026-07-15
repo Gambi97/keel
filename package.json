@@ -1,6 +1,6 @@
 {
   "name": "@gambi97/keel-cli",
-  "version": "0.3.6",
+  "version": "0.3.7",
   "description": "One command from zero to a production-shaped serverless infrastructure on Scaleway (Terraform + GitHub Actions + Infisical). Only Node required.",
   "keywords": [
     "keel",
