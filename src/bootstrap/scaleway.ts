@@ -189,15 +189,33 @@ export async function ensureStateBucket(answers: Answers): Promise<StateBucketRe
     if (status !== 404 && status !== 301) {
       throw error;
     }
-    await client.send(new CreateBucketCommand({ Bucket: bucket }));
-    // Versioning protects the state history against accidental overwrites.
-    await client.send(
-      new PutBucketVersioningCommand({
-        Bucket: bucket,
-        VersioningConfiguration: { Status: 'Enabled' },
-      }),
-    );
-    created = true;
+    // HeadBucket said "missing", but on Scaleway it can 404/301 a bucket we
+    // actually own (region/endpoint quirks, eventual consistency). CreateBucket
+    // is the authoritative check: treat AlreadyOwnedByYou as a resume, and
+    // AlreadyExists (owned by someone else) as the name clash Head would report.
+    try {
+      await client.send(new CreateBucketCommand({ Bucket: bucket }));
+      // Versioning protects the state history against accidental overwrites.
+      await client.send(
+        new PutBucketVersioningCommand({
+          Bucket: bucket,
+          VersioningConfiguration: { Status: 'Enabled' },
+        }),
+      );
+      created = true;
+    } catch (createError) {
+      const name = (createError as { name?: string }).name;
+      if (name === 'BucketAlreadyExists') {
+        throw new ScalewayError(
+          `Bucket "${bucket}" already exists but is owned by another account. ` +
+            'Choose a different project name.',
+        );
+      }
+      if (name !== 'BucketAlreadyOwnedByYou') {
+        throw createError;
+      }
+      // Already ours from an earlier run: fall through to (re)apply the policy.
+    }
   }
   const policyWarning = await lockDownStateBucket(client, bucket, answers);
   return policyWarning ? { created, policyWarning } : { created };
