@@ -59,9 +59,16 @@ export async function login(
     { method: 'POST', body: { clientId, clientSecret } },
   );
   if (status !== 200 || !data.accessToken) {
+    // A usage-limited client secret is a trap for this setup: besides the
+    // bootstrap, CI logs in with it on every plan/apply, so any finite limit
+    // eventually runs out. Name the fix instead of a generic "check secret".
+    const remediation = /usage limit/i.test(data.message ?? '')
+      ? 'This client secret was created with a usage limit and it is spent. Create a new one ' +
+        'with unlimited uses (Max Number of Uses = 0): CI logs in with it on every plan/apply, ' +
+        'so a limited secret will always run out.'
+      : 'Check the machine identity client ID/secret and that Universal Auth is enabled.';
     throw new InfisicalError(
-      `Infisical Universal Auth login failed (HTTP ${status}${data.message ? `: ${data.message}` : ''}). ` +
-        'Check the machine identity client ID/secret and that Universal Auth is enabled.',
+      `Infisical Universal Auth login failed (HTTP ${status}${data.message ? `: ${data.message}` : ''}). ${remediation}`,
     );
   }
   return data.accessToken;

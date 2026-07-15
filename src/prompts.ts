@@ -441,11 +441,15 @@ async function askScaleway(out: PartialAnswers): Promise<void> {
     }
 
     try {
-      await validateScalewayCredentials({
+      const { warning } = await validateScalewayCredentials({
         secretKey: out.scaleway.secretKey!,
         projectId: out.scaleway.projectId!,
         organizationId: out.scaleway.organizationId!,
       });
+      // e.g. an org policy that would make the first CI apply fail: better a
+      // loud heads-up now, while it is a 30-second console fix, than a red
+      // pipeline hours after everything here looked green.
+      if (warning) log.warn(warning);
       p.outro('Scaleway connected — credentials valid and project reachable.');
       return;
     } catch (error) {

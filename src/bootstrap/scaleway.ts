@@ -24,13 +24,47 @@ export class ScalewayError extends Error {
 const API_BASE = 'https://api.scaleway.com';
 
 /**
+ * The generated stack creates non-expiring service credentials (the app's
+ * database and Object Storage API keys are read by the container at runtime).
+ * An organization security setting that forces API-key expiration makes the
+ * very first CI apply fail — hours after the bootstrap looked green. Read the
+ * setting here (read-only) so the run can warn upfront, while it is still a
+ * 30-second console fix. Returns undefined when the key cannot read it.
+ */
+async function apiKeyExpirationPolicyWarning(
+  secretKey: string,
+  organizationId: string,
+): Promise<string | undefined> {
+  try {
+    const response = await fetch(
+      `${API_BASE}/iam/v1alpha1/organizations/${organizationId}/security-settings`,
+      { headers: { 'X-Auth-Token': secretKey } },
+    );
+    if (!response.ok) return undefined;
+    const settings = (await response.json()) as { max_api_key_expiration_duration?: string };
+    const seconds = Number.parseInt(settings.max_api_key_expiration_duration ?? '0', 10);
+    if (!Number.isFinite(seconds) || seconds <= 0) return undefined; // "0s" = unlimited
+    return (
+      'Your Scaleway organization requires API keys to expire ' +
+      `(max ${Math.round(seconds / 86400)} days). The database/storage credentials the ` +
+      'generated stack creates are non-expiring service credentials, so the first CI apply ' +
+      'WILL fail on them. Disable the requirement first (Console → Organization → Security → ' +
+      'API keys), then merge or re-run the apply.'
+    );
+  } catch {
+    return undefined;
+  }
+}
+
+/**
  * Validate credentials with a harmless read call before creating anything.
  * Also confirms the project belongs to the given organization. Read-only: it
- * proves the key can see the project, not that it can create resources.
+ * proves the key can see the project, not that it can create resources. The
+ * returned warning flags an org policy that would break the first CI apply.
  */
 export async function validateScalewayCredentials(
   scaleway: Pick<Answers['scaleway'], 'secretKey' | 'projectId' | 'organizationId'>,
-): Promise<void> {
+): Promise<{ warning?: string }> {
   const { secretKey, projectId, organizationId } = scaleway;
   const response = await fetch(`${API_BASE}/account/v3/projects/${projectId}`, {
     headers: { 'X-Auth-Token': secretKey },
@@ -62,6 +96,8 @@ export async function validateScalewayCredentials(
       'organization',
     );
   }
+  const warning = await apiKeyExpirationPolicyWarning(secretKey, organizationId);
+  return warning ? { warning } : {};
 }
 
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));

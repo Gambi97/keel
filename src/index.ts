@@ -376,8 +376,9 @@ async function runBootstrap(
   } else {
     // All three credentials are checked before anything is created anywhere,
     // so a bad token cannot leave a half-bootstrapped account behind.
+    let scalewayWarning: string | undefined;
     await withSpinner('Validating Scaleway, Infisical and GitHub credentials', async () => {
-      await validateScalewayCredentials(answers.scaleway);
+      scalewayWarning = (await validateScalewayCredentials(answers.scaleway)).warning;
       await validateInfisical(answers.infisical);
       ctx = await createContext(answers.github);
       // A repo with commits would make the push fail after the bucket and the
@@ -388,6 +389,7 @@ async function runBootstrap(
         assertRepoUsable(ctx, repoState);
       }
     });
+    if (scalewayWarning) log.warn(scalewayWarning);
   }
 
   for (const step of BOOTSTRAP_STEPS) {

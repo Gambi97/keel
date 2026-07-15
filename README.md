@@ -263,6 +263,12 @@ creating anything**.
    `ContainersFullAccess`, `ServerlessSQLDatabaseFullAccess`,
    `ContainerRegistryFullAccess`, plus `IAMManager` so Terraform can create
    the app's dedicated least-privilege database credential).
+5. **Organization security settings — API-key expiration must be unlimited**
+   (Console → Organization → Security → API keys). The app's database and
+   Object Storage credentials are non-expiring service credentials by design
+   (the container reads them at runtime); if your organization forces API
+   keys to expire, the first CI apply fails creating them. keel checks this
+   setting during validation and warns before anything is created.
 
 </details>
 
@@ -273,7 +279,9 @@ creating anything**.
 1. Create an account at [app.infisical.com](https://app.infisical.com) (or
    use a self-hosted instance).
 2. Create a **Machine Identity** with **Universal Auth**: you need its
-   **client ID** and **client secret**.
+   **client ID** and **client secret**. Create the client secret with
+   **unlimited uses** (Max Number of Uses = 0): CI logs in with it on every
+   plan/apply, so any finite usage limit eventually runs out mid-pipeline.
 3. Give the identity permission to create and manage projects.
 
 </details>

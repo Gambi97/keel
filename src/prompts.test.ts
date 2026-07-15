@@ -26,7 +26,7 @@ vi.mock('@clack/prompts', () => {
 });
 
 vi.mock('./ui.js', () => ({
-  log: { step: () => {}, success: () => {}, error: () => {}, info: () => {} },
+  log: { step: () => {}, success: () => {}, error: () => {}, info: () => {}, warn: () => {} },
   withSpinner: (_label: string, fn: () => unknown) => fn(),
 }));
 
@@ -98,7 +98,7 @@ beforeEach(() => {
   gh.authenticate.mockResolvedValue({ octokit: {}, owner: 'me', ownerId: 1 });
   gh.listOwnedRepos.mockResolvedValue([]); // no reusable repos → type a new name
   inf.validateInfisical.mockResolvedValue({});
-  scw.validateScalewayCredentials.mockResolvedValue(undefined);
+  scw.validateScalewayCredentials.mockResolvedValue({});
 });
 
 describe('fillMissing question order', () => {

@@ -209,6 +209,10 @@ Avoid local applies: they race against CI on the same state.
   match a Scaleway key with Object Storage access.
 - **Plan fails reading Infisical secrets**: check `INFISICAL_PROJECT_ID` and
   that the machine identity has access to the project and every environment.
+  If the error mentions a **usage limit**, the machine identity's client
+  secret was created with a maximum number of uses and it is spent: create a
+  new client secret with unlimited uses (the pipeline logs in on every
+  plan/apply) and update the `INFISICAL_CLIENT_SECRET` Actions secret.
 - **Apply green but no container**: expected until `container_image` is set.
 - **App can't reach the database**: `DATABASE_URL` is only synced after an
   apply; check the value in Infisical for that environment. It must contain
