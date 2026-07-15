@@ -258,8 +258,11 @@ export async function configureRepo(
     INFISICAL_HOST: answers.infisical.host,
   };
   await setVariables(ctx, variables);
-  await configureEnvironments(ctx, answers);
-  return protectMainBranch(ctx, answers);
+  const warnings = [
+    await configureEnvironments(ctx, answers),
+    await protectMainBranch(ctx, answers),
+  ].filter((w): w is string => w !== undefined);
+  return warnings.length > 0 ? warnings.join('\n\n') : undefined;
 }
 
 async function setSecrets(ctx: GitHubContext, secrets: Record<string, string>): Promise<void> {
@@ -304,16 +307,47 @@ async function setVariables(ctx: GitHubContext, variables: Record<string, string
   }
 }
 
-/** Each environment gets a GitHub deployment environment; gated ones (prod) require approval. */
-async function configureEnvironments(ctx: GitHubContext, answers: Answers): Promise<void> {
+/**
+ * Each environment gets a GitHub deployment environment; gated ones (prod)
+ * require a reviewer approval. Required reviewers need GitHub Enterprise Cloud
+ * on private repositories — GitHub answers 422 there. Rather than strand the
+ * bootstrap at its last step, fall back to an ungated environment and warn:
+ * the environment still exists (deployments target it) but production will
+ * auto-deploy on merge. Like the branch-protection miss, this degrades to a
+ * warning instead of killing the run.
+ */
+export async function configureEnvironments(
+  ctx: GitHubContext,
+  answers: Answers,
+): Promise<string | undefined> {
+  const ungated: string[] = [];
   for (const env of answers.environments) {
-    await ctx.octokit.repos.createOrUpdateEnvironment({
-      owner: ctx.owner,
-      repo: ctx.repo,
-      environment_name: env.githubEnvironment,
-      ...(env.gated ? { reviewers: [{ type: 'User', id: ctx.ownerId }] } : {}),
-    });
+    try {
+      await ctx.octokit.repos.createOrUpdateEnvironment({
+        owner: ctx.owner,
+        repo: ctx.repo,
+        environment_name: env.githubEnvironment,
+        ...(env.gated ? { reviewers: [{ type: 'User', id: ctx.ownerId }] } : {}),
+      });
+    } catch (error) {
+      // Only the reviewer rule can trip the plan limit; re-throw anything else
+      // (and any failure on a non-gated environment, which asked for no rule).
+      if (!env.gated || (error as { status?: number }).status !== 422) throw error;
+      await ctx.octokit.repos.createOrUpdateEnvironment({
+        owner: ctx.owner,
+        repo: ctx.repo,
+        environment_name: env.githubEnvironment,
+      });
+      ungated.push(env.githubEnvironment);
+    }
   }
+  if (ungated.length === 0) return undefined;
+  return (
+    `Created the ${ungated.join(', ')} environment(s) without the manual-approval gate: ` +
+    'required reviewers need GitHub Enterprise Cloud on private repositories, so production ' +
+    'will auto-deploy on merge to main. Make the repository public (reviewers are free there) ' +
+    'or upgrade the plan, then re-run to add the gate.'
+  );
 }
 
 /**

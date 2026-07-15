@@ -197,3 +197,9 @@ Avoid local applies: they race against CI on the same state.
 - **Apply fails creating IAM resources**: the CI Scaleway key needs IAM
   permissions (IAMManager) to create the app's database (and Object Storage)
   credential.
+- **Apply fails with "expires_at ... organization security settings require an
+  expiration date for API keys"**: the app's database and Object Storage
+  credentials are long-lived service credentials — the container reads them at
+  runtime, so they intentionally never expire. If your Scaleway organization
+  enforces API-key expiration, exempt these service applications or turn the
+  policy off (Console → Organization → Security), then re-run the apply.
