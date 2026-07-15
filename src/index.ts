@@ -351,7 +351,12 @@ const BOOTSTRAP_STEPS: BootstrapStep[] = [
     skipMessage: 'GitHub configuration: already done, skipping.',
     run: async (answers, ctx, state) => {
       // Recorded by the infisical step (this run or a resumed one).
-      await configureRepo(ctx, answers, stepData(state, 'infisical', 'projectId') as string);
+      const warning = await configureRepo(
+        ctx,
+        answers,
+        stepData(state, 'infisical', 'projectId') as string,
+      );
+      return warning ? { warning } : undefined;
     },
   },
 ];
