@@ -12,7 +12,7 @@ import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 import type { Answers, KeelManifest } from './config.js';
-import { CONTRACT_VERSION } from './contracts.js';
+import { CONTRACT_VERSION, PLACEHOLDER_IMAGE } from './contracts.js';
 import { toolVersion } from './meta.js';
 import { STATE_FILE } from './state.js';
 
@@ -106,6 +106,7 @@ function envTfvarsTokens(
     __ENABLE_OBJECT_STORAGE__: String(answers.objectStorage),
     __MIN_SCALE__: String(env.minScale),
     __MAX_SCALE__: String(env.maxScale),
+    __CONTAINER_IMAGE__: PLACEHOLDER_IMAGE,
   };
 }
 

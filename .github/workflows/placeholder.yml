@@ -1,0 +1,38 @@
+name: Placeholder image
+
+on:
+  push:
+    branches: [main]
+    paths: ['placeholder/**', '.github/workflows/placeholder.yml']
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  packages: write
+
+jobs:
+  build-push:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Log in to GHCR
+        run: echo "${{ secrets.GITHUB_TOKEN }}" | docker login ghcr.io -u "${{ github.actor }}" --password-stdin
+      - name: Build
+        run: docker build -t ghcr.io/gambi97/keel-placeholder:v1 -t ghcr.io/gambi97/keel-placeholder:latest placeholder
+      - name: Smoke-test the container
+        run: |
+          docker run -d --rm -p 8080:8080 -e PROJECT_NAME=smoke -e APP_ENVIRONMENT=ci --name ph ghcr.io/gambi97/keel-placeholder:v1
+          sleep 2
+          curl -fsS http://localhost:8080/healthz
+          curl -fsS http://localhost:8080/ | grep -q smoke
+          # Basic Auth contract: 401 without credentials, 200 with them.
+          docker rm -f ph
+          docker run -d --rm -p 8081:8080 -e BASIC_AUTH_ENABLED=true -e BASIC_AUTH_USER=u -e BASIC_AUTH_PASSWORD=p --name ph2 ghcr.io/gambi97/keel-placeholder:v1
+          sleep 2
+          test "$(curl -s -o /dev/null -w '%{http_code}' http://localhost:8081/)" = "401"
+          curl -fsS -u u:p http://localhost:8081/ > /dev/null
+          docker rm -f ph2
+      - name: Push
+        run: |
+          docker push ghcr.io/gambi97/keel-placeholder:v1
+          docker push ghcr.io/gambi97/keel-placeholder:latest

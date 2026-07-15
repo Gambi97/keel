@@ -51,6 +51,23 @@ export const BASIC_AUTH_SECRET_KEYS = ['BASIC_AUTH_USER', 'BASIC_AUTH_PASSWORD']
 export const BASIC_AUTH_FLAG = 'BASIC_AUTH_ENABLED';
 
 /**
+ * Public image rendered as the default container_image in every generated
+ * <env>.tfvars: the very first apply brings a keel-branded page up, so
+ * APP_URL is real from day zero. Built and pushed by the Placeholder image
+ * workflow from placeholder/ in this repo; it is also the reference
+ * implementation of the env contract (PROJECT_NAME, APP_ENVIRONMENT,
+ * BASIC_AUTH_*). Users replace it by editing container_image — or set ""
+ * to skip the container entirely.
+ */
+export const PLACEHOLDER_IMAGE = 'ghcr.io/gambi97/keel-placeholder:v1';
+
+/**
+ * Plain environment variables the generated app_stack injects into the
+ * container, so any image (the placeholder first) knows what it runs as.
+ */
+export const CONTAINER_ENV_KEYS = ['PROJECT_NAME', 'APP_ENVIRONMENT'] as const;
+
+/**
  * Naming convention for per-environment resources (registry, namespaces,
  * database, buckets…): mirrored by `local.name` in the app_stack template,
  * which contracts.test.ts pins against this function.

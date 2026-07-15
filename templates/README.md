@@ -65,11 +65,13 @@ tag vX.Y.Z        -> apply production (the commit the tag points at)
 
 ## First deploy
 
-1. **Merge or push to `main`.** The first pipeline run creates registry and
-   databases for the non-production environments (and the Object Storage
-   bucket, if enabled). The Serverless Container is intentionally skipped until
-   an image exists (`container_image` is empty), so the first apply is green.
-   Production waits for a version tag (step 5).
+1. **Merge or push to `main`.** The first pipeline run creates the registry,
+   the database and a Serverless Container for each non-production
+   environment (and the Object Storage bucket, if enabled). The container
+   starts on **keel's placeholder page** (`container_image` in the tfvars), so
+   `terraform output container_url` — and the `APP_URL` secret — are real from
+   day zero. Production waits for a version tag (step 5). Setting
+   `container_image = ""` skips the container entirely.
 
 2. **Build and push the app image** (any Dockerfile, listening on port 8080
    by default), replacing `<env>` with your target environment (e.g. staging):
@@ -91,7 +93,7 @@ tag vX.Y.Z        -> apply production (the commit the tag points at)
    | Variable | Where | Notes |
    |---|---|---|
    | `DATABASE_URL` | every environment | Complete connection string, auto-updated by the pipeline after each apply. No action needed |
-   | `APP_URL` | every environment | Public URL of the app, auto-updated by the pipeline once a container exists. Useful for links, OAuth callbacks, webhooks |
+   | `APP_URL` | every environment | Public URL of the app, auto-updated by the pipeline after each apply (real from the first one — the placeholder counts). Useful for links, OAuth callbacks, webhooks |
    | `BASIC_AUTH_USER` / `BASIC_AUTH_PASSWORD` | non-production | The app must enforce these when `BASIC_AUTH_ENABLED=true` |
    | `S3_BUCKET` / `S3_ENDPOINT` / `S3_REGION` / `S3_ACCESS_KEY` / `S3_SECRET_KEY` | every environment (if Object Storage enabled) | Auto-updated by the pipeline after each apply |
 
@@ -213,7 +215,11 @@ Avoid local applies: they race against CI on the same state.
   secret was created with a maximum number of uses and it is spent: create a
   new client secret with unlimited uses (the pipeline logs in on every
   plan/apply) and update the `INFISICAL_CLIENT_SECRET` Actions secret.
-- **Apply green but no container**: expected until `container_image` is set.
+- **Apply green but no container**: expected only when `container_image` is
+  `""`; by default every environment serves keel's placeholder page.
+- **The app answers 401**: non-production environments enforce Basic Auth by
+  default — the credentials are `BASIC_AUTH_USER` / `BASIC_AUTH_PASSWORD` in
+  that environment's Infisical secrets.
 - **App can't reach the database**: `DATABASE_URL` is only synced after an
   apply; check the value in Infisical for that environment. It must contain
   a username and password (the dedicated IAM credential), not placeholders.

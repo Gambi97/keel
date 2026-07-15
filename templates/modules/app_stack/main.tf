@@ -81,9 +81,9 @@ resource "scaleway_iam_api_key" "storage" {
   description    = "Object Storage credential for ${local.name} (managed by Terraform)"
 }
 
-# The container is gated on an image being available: registry and database
-# are provisioned first, the container appears once an image has been pushed
-# and container_image is set.
+# The container runs whatever image the tfvars point at — keel's placeholder
+# page at first, the application once its image is pushed. Setting
+# container_image = "" skips the container entirely.
 resource "scaleway_container" "this" {
   count = var.container_image == "" ? 0 : 1
 
@@ -97,9 +97,15 @@ resource "scaleway_container" "this" {
   max_scale          = var.max_scale
   privacy            = "public"
 
-  environment_variables = var.enable_basic_auth ? {
-    BASIC_AUTH_ENABLED = "true"
-  } : {}
+  # Plain identity variables any image can rely on; the placeholder renders
+  # them, real apps are free to ignore them.
+  environment_variables = merge(
+    {
+      PROJECT_NAME    = var.project_name
+      APP_ENVIRONMENT = var.environment
+    },
+    var.enable_basic_auth ? { BASIC_AUTH_ENABLED = "true" } : {},
+  )
 
   # BASIC_AUTH_USER / BASIC_AUTH_PASSWORD / DATABASE_URL arrive here from
   # Infisical; the app is responsible for enforcing Basic Auth when enabled.

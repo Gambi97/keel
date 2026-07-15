@@ -69,6 +69,9 @@ describe('generateProject', () => {
     expect(tfvars).toMatch(/environment\s+= "staging"/);
     expect(tfvars).toMatch(/enable_basic_auth\s+= true/);
     expect(tfvars).toMatch(/enable_object_storage\s+= false/);
+    // Day zero ships keel's placeholder page: the first apply brings a
+    // container up and APP_URL is real immediately.
+    expect(tfvars).toContain('container_image = "ghcr.io/gambi97/keel-placeholder:v1"');
 
     // The apply workflow: non-prod deploys on merge to main, prod on a tag.
     const apply = readFileSync(join(target, '.github/workflows/terraform-apply.yml'), 'utf8');

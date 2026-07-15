@@ -213,7 +213,7 @@ per-environment `<env>.tfvars` files.
 | Infisical machine identity          | GitHub encrypted secrets | Lets Terraform read app secrets at plan/apply                                        |
 | Basic Auth user/password            | Infisical (non-prod)     | App secret, injected into the container, rotatable                                   |
 | Database connection string          | Infisical (each env)     | Complete, ready-to-use value synced by the pipeline after each apply                 |
-| App public URL (`APP_URL`)          | Infisical (each env)     | Synced by the pipeline once a container exists; for links, OAuth callbacks, webhooks |
+| App public URL (`APP_URL`)          | Infisical (each env)     | Synced by the pipeline after each apply (real from the first one — the container starts on keel's placeholder page); for links, OAuth callbacks, webhooks |
 | Object Storage coordinates (opt-in) | Infisical (each env)     | `S3_*` values synced by the pipeline after each apply                                |
 | Bucket, region, Infisical project   | GitHub variables         | Non-sensitive wiring, editable in one place                                          |
 | Project name, scaling, image        | Committed tfvars         | Reviewable configuration, no secrets                                                 |
