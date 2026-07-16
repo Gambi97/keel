@@ -69,9 +69,16 @@ describe('generateProject', () => {
     expect(tfvars).toMatch(/environment\s+= "staging"/);
     expect(tfvars).toMatch(/enable_basic_auth\s+= true/);
     expect(tfvars).toMatch(/enable_object_storage\s+= false/);
-    // Day zero ships keel's placeholder page: the first apply brings a
-    // container up and APP_URL is real immediately.
-    expect(tfvars).toContain('container_image = "ghcr.io/gambi97/keel-placeholder:v1"');
+    // Container resources are always rendered, so the growth knob is visible
+    // in the tfvars instead of hidden in the module defaults.
+    expect(tfvars).toMatch(/cpu_limit\s+= 500/);
+    expect(tfvars).toMatch(/memory_limit\s+= 1024/);
+    // Day zero ships keel's placeholder page from the environment's OWN
+    // registry (the apply workflow seeds it there): the first apply brings a
+    // container up with no runtime dependency on an external registry.
+    expect(tfvars).toContain(
+      'container_image = "rg.fr-par.scw.cloud/demo-app-staging/keel-placeholder:v2"',
+    );
 
     // The apply workflow: non-prod deploys on merge to main, prod on a tag.
     const apply = readFileSync(join(target, '.github/workflows/terraform-apply.yml'), 'utf8');

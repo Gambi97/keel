@@ -61,6 +61,38 @@ export const ENV_PRESETS: Record<string, EnvSlug[]> = {
 };
 export const DEFAULT_ENV_PRESET = 'staging+prod';
 
+/** Per-instance container resources, in Scaleway units (mvCPU / MB). */
+export interface ContainerSize {
+  cpuLimit: number;
+  memoryLimit: number;
+}
+
+/**
+ * Container size presets exposed on the CLI and in the prompt, keyed by their
+ * mvCPU value. Scaleway accepts any combination in range (70-6000 mvCPU,
+ * 128-12228 MB), so these are opinions, not API constraints: pairs that keep
+ * a sane cpu:memory ratio. Applied to every environment; a per-env change is
+ * a cpu_limit/memory_limit edit in that env's tfvars. The hint is what the
+ * interactive select shows — kept here so preset and description cannot drift.
+ */
+export const CONTAINER_SIZES: Record<string, ContainerSize & { hint: string }> = {
+  '100m': { cpuLimit: 100, memoryLimit: 128, hint: 'smallest — webhooks, tiny APIs' },
+  '250m': { cpuLimit: 250, memoryLimit: 256, hint: 'light apps' },
+  '500m': { cpuLimit: 500, memoryLimit: 1024, hint: 'recommended — fast cold starts' },
+  '1000m': { cpuLimit: 1000, memoryLimit: 2048, hint: 'CPU-heavy apps' },
+};
+export const DEFAULT_CONTAINER_SIZE = '500m';
+
+export function validateContainerSize(raw: string): string {
+  const key = raw.trim();
+  if (!CONTAINER_SIZES[key]) {
+    throw new ConfigError(
+      `Invalid container size "${raw}". Supported sizes: ${Object.keys(CONTAINER_SIZES).join(', ')}.`,
+    );
+  }
+  return key;
+}
+
 /** A fully-resolved environment, ready to render into templates and APIs. */
 export interface EnvConfig {
   slug: EnvSlug;
@@ -104,6 +136,8 @@ export interface Answers {
   basicAuth: boolean;
   /** Provision a per-environment Object Storage bucket for the application. */
   objectStorage: boolean;
+  /** Per-instance container resources, resolved from a CONTAINER_SIZES preset. */
+  containerSize: ContainerSize;
   environments: EnvConfig[];
 }
 
@@ -132,8 +166,9 @@ export interface KeelManifest {
 
 /**
  * Lock a resume's configuration to what the repo was generated with. Scaling
- * is intentionally not carried: it only shapes the tfvars, which are already
- * generated on any run that has a manifest, so post-generate steps never read it.
+ * and container size are intentionally not carried: they only shape the tfvars,
+ * which are already generated on any run that has a manifest, so post-generate
+ * steps never read them.
  *
  * The GitHub repo identity is locked too: on resume the target repository is
  * already decided (keel created and pushed it), so the picker must not run and
@@ -165,6 +200,8 @@ export type PartialAnswers = {
   github: Partial<Answers['github']>;
   basicAuth?: boolean;
   objectStorage?: boolean;
+  /** CONTAINER_SIZES preset key; undefined means "use the default". */
+  containerSize?: string;
   /** Selected environment slugs; undefined means "use the default preset". */
   environments?: string[];
   scaling: ScalingOverrides;
@@ -290,6 +327,7 @@ export function mergeAnswers(...sources: PartialAnswers[]): PartialAnswers {
       'targetDir',
       'basicAuth',
       'objectStorage',
+      'containerSize',
     ] as const) {
       const value = src[key];
       if (value !== undefined) {
@@ -350,7 +388,6 @@ export function resolveEnvironments(
 /** Validate a fully-collected set of answers and freeze it into a Config. */
 export function finalizeAnswers(partial: PartialAnswers): Answers {
   const projectName = validateProjectName(requireString(partial.projectName, 'project name'));
-  const region = validateRegion(partial.region ?? DEFAULT_REGION);
   const slugs =
     partial.environments && partial.environments.length > 0
       ? normalizeEnvSlugs(partial.environments)
@@ -358,24 +395,11 @@ export function finalizeAnswers(partial: PartialAnswers): Answers {
   const basicAuth = partial.basicAuth ?? true;
   return {
     projectName,
-    region,
+    region: validateRegion(partial.region ?? DEFAULT_REGION),
     targetDir: partial.targetDir?.trim() || projectName,
     stateBucket: stateBucketName(projectName),
-    scaleway: {
-      accessKey: requireString(partial.scaleway.accessKey, 'Scaleway access key'),
-      secretKey: requireString(partial.scaleway.secretKey, 'Scaleway secret key'),
-      projectId: requireString(partial.scaleway.projectId, 'Scaleway project ID'),
-      organizationId: requireString(partial.scaleway.organizationId, 'Scaleway organization ID'),
-    },
-    infisical: {
-      host: validateUrl(partial.infisical.host ?? DEFAULT_INFISICAL_HOST, 'Infisical host'),
-      clientId: requireString(partial.infisical.clientId, 'Infisical client ID'),
-      clientSecret: requireString(partial.infisical.clientSecret, 'Infisical client secret'),
-      projectName: partial.infisical.projectName?.trim() || projectName,
-      ...(partial.infisical.projectId?.trim()
-        ? { projectId: partial.infisical.projectId.trim() }
-        : {}),
-    },
+    scaleway: finalizeScaleway(partial),
+    infisical: finalizeInfisical(partial, projectName),
     github: {
       token: requireString(partial.github.token, 'GitHub token'),
       repoName: validateProjectName(partial.github.repoName?.trim() || projectName),
@@ -383,14 +407,80 @@ export function finalizeAnswers(partial: PartialAnswers): Answers {
     },
     basicAuth,
     objectStorage: partial.objectStorage ?? false,
+    containerSize: resolveContainerSize(partial.containerSize),
     environments: resolveEnvironments(slugs, basicAuth, partial.scaling),
   };
 }
 
+function finalizeScaleway(partial: PartialAnswers): Answers['scaleway'] {
+  return {
+    accessKey: requireString(partial.scaleway.accessKey, 'Scaleway access key'),
+    secretKey: requireString(partial.scaleway.secretKey, 'Scaleway secret key'),
+    projectId: requireString(partial.scaleway.projectId, 'Scaleway project ID'),
+    organizationId: requireString(partial.scaleway.organizationId, 'Scaleway organization ID'),
+  };
+}
+
+function finalizeInfisical(partial: PartialAnswers, projectName: string): Answers['infisical'] {
+  return {
+    host: validateUrl(partial.infisical.host ?? DEFAULT_INFISICAL_HOST, 'Infisical host'),
+    clientId: requireString(partial.infisical.clientId, 'Infisical client ID'),
+    clientSecret: requireString(partial.infisical.clientSecret, 'Infisical client secret'),
+    projectName: partial.infisical.projectName?.trim() || projectName,
+    ...(partial.infisical.projectId?.trim()
+      ? { projectId: partial.infisical.projectId.trim() }
+      : {}),
+  };
+}
+
+/**
+ * What `keel teardown` needs to find and delete everything: the naming inputs
+ * plus the Scaleway and Infisical credentials. Deliberately NOT an Answers —
+ * teardown never touches GitHub and asks no configuration, so requiring a
+ * GitHub token or defaulting environments here would be lying about needs.
+ */
+export interface TeardownConfig {
+  projectName: string;
+  region: Region;
+  targetDir: string;
+  stateBucket: string;
+  scaleway: Answers['scaleway'];
+  infisical: Answers['infisical'];
+}
+
+export function finalizeTeardownAnswers(partial: PartialAnswers): TeardownConfig {
+  const projectName = validateProjectName(requireString(partial.projectName, 'project name'));
+  return {
+    projectName,
+    region: validateRegion(partial.region ?? DEFAULT_REGION),
+    targetDir: partial.targetDir?.trim() || projectName,
+    stateBucket: stateBucketName(projectName),
+    scaleway: finalizeScaleway(partial),
+    infisical: finalizeInfisical(partial, projectName),
+  };
+}
+
+function resolveContainerSize(raw: string | undefined): ContainerSize {
+  const size = CONTAINER_SIZES[validateContainerSize(raw ?? DEFAULT_CONTAINER_SIZE)]!;
+  // The hint is prompt copy, not configuration: keep it out of Answers.
+  return { cpuLimit: size.cpuLimit, memoryLimit: size.memoryLimit };
+}
+
 /** List which required values are still missing, for non-interactive runs. */
 export function missingRequired(partial: PartialAnswers): string[] {
+  const missing = missingProviderCredentials(partial);
+  if (!partial.projectName?.trim()) missing.unshift('project name (--name)');
+  if (!partial.github.token?.trim()) missing.push('GitHub token (--github-token or GITHUB_TOKEN)');
+  return missing;
+}
+
+/** The teardown variant: same providers, minus GitHub (never touched). */
+export function missingRequiredTeardown(partial: PartialAnswers): string[] {
+  return missingProviderCredentials(partial);
+}
+
+function missingProviderCredentials(partial: PartialAnswers): string[] {
   const missing: string[] = [];
-  if (!partial.projectName?.trim()) missing.push('project name (--name)');
   if (!partial.scaleway.accessKey?.trim())
     missing.push('Scaleway access key (--scw-access-key or SCW_ACCESS_KEY)');
   if (!partial.scaleway.secretKey?.trim())
@@ -403,6 +493,5 @@ export function missingRequired(partial: PartialAnswers): string[] {
     missing.push('Infisical client ID (--infisical-client-id or INFISICAL_CLIENT_ID)');
   if (!partial.infisical.clientSecret?.trim())
     missing.push('Infisical client secret (--infisical-client-secret or INFISICAL_CLIENT_SECRET)');
-  if (!partial.github.token?.trim()) missing.push('GitHub token (--github-token or GITHUB_TOKEN)');
   return missing;
 }

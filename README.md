@@ -178,7 +178,7 @@ every merge; production is promoted by pushing a version tag.
 | Scaleway resource                           | Notes                                                                                                                                           |
 | ------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------- |
 | Registry namespace                          | Private, one per environment                                                                                                                    |
-| Container namespace + Serverless Container  | The container appears once you set `container_image` in the tfvars; registry and database are created right away                                |
+| Container namespace + Serverless Container  | The container starts on keel's placeholder page and switches to your app when you set `container_image` in the tfvars                           |
 | Serverless SQL Database                     | One per environment; after each apply the pipeline writes a ready-to-use connection string to Infisical as `DATABASE_URL`                       |
 | IAM application + API key                   | Dedicated credential that can only read/write the database (least privilege), embedded in `DATABASE_URL`                                        |
 | Object Storage bucket + credential (opt-in) | Only with `--object-storage`: one bucket per environment plus a dedicated least-privilege credential; coordinates synced to Infisical as `S3_*` |
@@ -235,7 +235,7 @@ short version of the first deploy:
    docker push rg.fr-par.scw.cloud/my-app-<env>/app:latest
    ```
 3. **Set `container_image`** in the tfvars and open a PR: the next apply
-   creates the containers.
+   replaces the placeholder page with your app.
 4. **Replace the placeholder secrets** in Infisical with real values. The app
    reads `DATABASE_URL`, `APP_URL`, `BASIC_AUTH_*` and (if enabled) `S3_*` from
    its environment; non-production environments also receive
@@ -356,6 +356,32 @@ is recorded in `.keel.json` inside the project directory. If a run fails
 halfway, fix the cause and **re-run the same command**: completed steps are
 skipped, existing resources are reused, nothing is duplicated.
 
+## Tearing it down
+
+`keel teardown` deletes everything a project created on Scaleway and
+Infisical, so the name can be reused for a fresh run — no console clicking:
+
+```sh
+npx @gambi97/keel-cli teardown --name my-app            # asks to type the name back
+npx @gambi97/keel-cli teardown --name my-app --dry-run  # print the plan, delete nothing
+npx @gambi97/keel-cli teardown --name my-app --yes      # non-interactive
+```
+
+It removes, where present: the per-environment Scaleway resources (container
+and registry namespaces, databases, IAM applications/policies, Object Storage
+buckets) for **every** environment keel could have created, the Terraform
+state bucket, and the Infisical project. Resources are found by keel's exact
+naming convention inside your Scaleway project, missing ones are skipped, and
+a partially-failed teardown can simply be re-run.
+
+The **GitHub repository is never touched** — it is the source of truth and
+may hold your own commits, the one thing a re-run cannot recreate. Deleting it
+stays a manual act: repository Settings → Danger Zone. Teardown therefore
+needs no GitHub token at all; it uses the same Scaleway and Infisical
+credentials as the bootstrap (pass the same `--region` / `--infisical-host`
+the project was created with — interactive runs ask). Your credentials
+themselves and the local directory are never touched.
+
 ## FAQ
 
 **Do I need Terraform, `scw` or `gh` installed?**
@@ -376,10 +402,12 @@ Yes: pass its project ID (`--infisical-project-id` or interactively). The CLI
 verifies the machine identity can access it before anything is created. Leave
 it empty and keel creates a project named after your app instead.
 
-**Why is the container not created on the first apply?**
-A Serverless Container needs an image, and none exists yet. Registry and
-database are created immediately; the container is gated on
-`container_image`, so the first apply is green instead of failing.
+**What does the container run before I push my image?**
+keel's placeholder page, a tiny image that renders the project name and
+environment, so the very first apply brings a real URL up. The apply workflow
+copies it into the environment's own registry on the first run — the container
+never depends on an external registry. Replace it with your app's image when
+ready, or set `container_image = ""` to skip the container entirely.
 
 **Why Basic Auth "at the app level"?**
 Scaleway Serverless Containers have no built-in auth in front of public
@@ -415,6 +443,9 @@ off by default — many apps only need the database.
 ## CLI reference
 
 ```
+npx @gambi97/keel-cli [options]            create and bootstrap a project
+npx @gambi97/keel-cli teardown [options]   delete a project's Scaleway/Infisical resources
+
 --name <name>                  Project name (dns-safe: lowercase, digits, hyphens)
 --dir <path>                   Target directory (default: ./<name>)
 --region <region>              fr-par | nl-ams | pl-waw (default: fr-par)
@@ -437,6 +468,8 @@ off by default — many apps only need the database.
 --no-object-storage            Do not provision Object Storage (default)
 --basic-auth                   Enable Basic Auth on non-production environments (default)
 --no-basic-auth                Disable Basic Auth on non-production environments
+--container-size <size>        Per-instance resources: 100m | 250m | 500m | 1000m
+                               (mvCPU; default 500m = 500 mvCPU / 1024 MB)
 --dev-min-scale <n>            Default 0        --dev-max-scale <n>       Default 1
 --staging-min-scale <n>        Default 0        --staging-max-scale <n>   Default 1
 --prod-min-scale <n>           Default 0        --prod-max-scale <n>      Default 1

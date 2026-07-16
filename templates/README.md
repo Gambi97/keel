@@ -68,9 +68,11 @@ tag vX.Y.Z        -> apply production (the commit the tag points at)
 1. **Merge or push to `main`.** The first pipeline run creates the registry,
    the database and a Serverless Container for each non-production
    environment (and the Object Storage bucket, if enabled). The container
-   starts on **keel's placeholder page** (`container_image` in the tfvars), so
-   `terraform output container_url` — and the `APP_URL` secret — are real from
-   day zero. Production waits for a version tag (step 5). Setting
+   starts on **keel's placeholder page**, copied by the pipeline into the
+   environment's own registry on the first apply (`container_image` in the
+   tfvars points there), so `terraform output container_url` — and the
+   `APP_URL` secret — are real from day zero with no dependency on any
+   external registry. Production waits for a version tag (step 5). Setting
    `container_image = ""` skips the container entirely.
 
 2. **Build and push the app image** (any Dockerfile, listening on port 8080
@@ -124,9 +126,10 @@ environment enables it is the `enable_basic_auth` flag in its `<env>.tfvars`.
 
 ## Day-2 operations
 
-- **Scale**: adjust `min_scale` / `max_scale` (instances) in the tfvars;
-  `cpu_limit`, `memory_limit`, `container_port`, `db_min_cpu` / `db_max_cpu`
-  are variables with sensible defaults you can override the same way.
+- **Scale**: adjust `min_scale` / `max_scale` (instances) and `cpu_limit` /
+  `memory_limit` (per-instance resources) in the tfvars; `container_port` and
+  `db_min_cpu` / `db_max_cpu` are variables with sensible defaults you can
+  override the same way.
 - **Rotate an app secret**: change it in Infisical, trigger an apply. No
   commit needed.
 - **Rotate the database credential**: `terraform apply

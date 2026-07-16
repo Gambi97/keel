@@ -12,7 +12,7 @@ import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 import type { Answers, KeelManifest } from './config.js';
-import { CONTRACT_VERSION, PLACEHOLDER_IMAGE } from './contracts.js';
+import { CONTRACT_VERSION, PLACEHOLDER_SOURCE_IMAGE, placeholderImageRef } from './contracts.js';
 import { toolVersion } from './meta.js';
 import { STATE_FILE } from './state.js';
 
@@ -106,7 +106,11 @@ function envTfvarsTokens(
     __ENABLE_OBJECT_STORAGE__: String(answers.objectStorage),
     __MIN_SCALE__: String(env.minScale),
     __MAX_SCALE__: String(env.maxScale),
-    __CONTAINER_IMAGE__: PLACEHOLDER_IMAGE,
+    __CPU_LIMIT__: String(answers.containerSize.cpuLimit),
+    __MEMORY_LIMIT__: String(answers.containerSize.memoryLimit),
+    // The environment's own registry copy of the placeholder; the apply
+    // workflow seeds it there on the first apply.
+    __CONTAINER_IMAGE__: placeholderImageRef(answers.projectName, answers.region, env.slug),
   };
 }
 
@@ -164,6 +168,10 @@ function renderApplyWorkflow(
         __GH_ENVIRONMENT__: env.githubEnvironment,
         __APPLY_IF__: applyIf,
         __NEEDS_LINE__: needs,
+        // The seed step compares the tfvars image against this exact ref and
+        // copies the GHCR source into the env's registry when it is missing.
+        __PLACEHOLDER_IMAGE__: placeholderImageRef(answers.projectName, answers.region, env.slug),
+        __PLACEHOLDER_SOURCE_IMAGE__: PLACEHOLDER_SOURCE_IMAGE,
       },
       '_partials/apply-job.yml',
     );

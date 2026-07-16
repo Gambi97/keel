@@ -44,6 +44,19 @@ jobs:
             echo "published=false" >> "$GITHUB_OUTPUT"
           fi
 
+      # Every generated repo's first apply copies the placeholder source
+      # image from GHCR into its own registry: refuse to publish a CLI that
+      # references a tag nobody has pushed yet (merging placeholder/ changes
+      # to main publishes it via the Placeholder image workflow).
+      - name: Ensure the placeholder source image exists on GHCR
+        if: steps.check.outputs.published == 'false'
+        run: |
+          image="$(node -e "import('./dist/contracts.js').then(m => console.log(m.PLACEHOLDER_SOURCE_IMAGE))")"
+          if ! docker manifest inspect "$image" > /dev/null 2>&1; then
+            echo "Placeholder image $image is not on GHCR — publish it (Placeholder image workflow) before releasing." >&2
+            exit 1
+          fi
+
       - name: Publish to npm with provenance
         if: steps.check.outputs.published == 'false'
         run: npm publish --provenance --access public

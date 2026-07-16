@@ -18,23 +18,23 @@ jobs:
       - name: Log in to GHCR
         run: echo "${{ secrets.GITHUB_TOKEN }}" | docker login ghcr.io -u "${{ github.actor }}" --password-stdin
       - name: Build
-        run: docker build -t ghcr.io/gambi97/keel-placeholder:v1 -t ghcr.io/gambi97/keel-placeholder:latest placeholder
+        run: docker build -t ghcr.io/gambi97/keel-placeholder:v2 -t ghcr.io/gambi97/keel-placeholder:latest placeholder
       - name: Smoke-test the container
         run: |
           fail() { echo "--- container logs ---"; docker logs "$1" || true; exit 1; }
           # Never one-shot a freshly started container: wait until it answers.
           wait_up() { for _ in $(seq 1 40); do curl -fsS "http://127.0.0.1:$2/healthz" >/dev/null 2>&1 && return 0; sleep 0.5; done; fail "$1"; }
-          docker run -d -p 8080:8080 -e PROJECT_NAME=smoke -e APP_ENVIRONMENT=ci --name ph ghcr.io/gambi97/keel-placeholder:v1
+          docker run -d -p 8080:8080 -e PROJECT_NAME=smoke -e APP_ENVIRONMENT=ci --name ph ghcr.io/gambi97/keel-placeholder:v2
           wait_up ph 8080
           curl -fsS http://127.0.0.1:8080/ | grep -q smoke || fail ph
           # Basic Auth contract: 401 without credentials, 200 with them.
           docker rm -f ph
-          docker run -d -p 8081:8080 -e BASIC_AUTH_ENABLED=true -e BASIC_AUTH_USER=u -e BASIC_AUTH_PASSWORD=p --name ph2 ghcr.io/gambi97/keel-placeholder:v1
+          docker run -d -p 8081:8080 -e BASIC_AUTH_ENABLED=true -e BASIC_AUTH_USER=u -e BASIC_AUTH_PASSWORD=p --name ph2 ghcr.io/gambi97/keel-placeholder:v2
           wait_up ph2 8081
           test "$(curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:8081/)" = "401" || fail ph2
           curl -fsS -u u:p http://127.0.0.1:8081/ > /dev/null || fail ph2
           docker rm -f ph2
       - name: Push
         run: |
-          docker push ghcr.io/gambi97/keel-placeholder:v1
+          docker push ghcr.io/gambi97/keel-placeholder:v2
           docker push ghcr.io/gambi97/keel-placeholder:latest

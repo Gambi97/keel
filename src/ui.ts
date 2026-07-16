@@ -63,6 +63,7 @@ export function renderSummary(answers: Answers, dryRun: boolean): string {
     `  environments   ${envSlugs} (+ placeholder secrets)`,
     '',
     `Object Storage   ${answers.objectStorage ? 'enabled (per-environment bucket + S3_* secrets)' : 'disabled'}`,
+    `Container size   ${answers.containerSize.cpuLimit} mvCPU / ${answers.containerSize.memoryLimit} MB per instance`,
     'Environments',
   ];
   for (const env of answers.environments) {

@@ -202,6 +202,45 @@ export async function validateInfisical(
   return {};
 }
 
+/**
+ * Delete the project (teardown). Resolved by ID when one is known — the
+ * recorded one from .keel.json or an explicit flag — and by exact name
+ * otherwise, mirroring the find-or-create of the bootstrap. Absent is a valid
+ * outcome so a re-run never fails on work already done.
+ *
+ * When ownership is unknown (no bootstrap record), a project reached by ID
+ * whose name is not the expected one is answered 'kept': keel's own default
+ * creation names the project after the app, so a differently-named project
+ * is a reused one keel must not destroy.
+ */
+export async function deleteProject(
+  infisical: Pick<
+    Answers['infisical'],
+    'host' | 'clientId' | 'clientSecret' | 'projectName' | 'projectId'
+  >,
+): Promise<'deleted' | 'absent' | 'kept'> {
+  const token = await login(infisical);
+  const existing = infisical.projectId
+    ? await findProjectById(infisical.host, token, infisical.projectId)
+    : await findProject(infisical.host, token, infisical.projectName);
+  if (!existing) return 'absent';
+  if (infisical.projectId && existing.name !== infisical.projectName) {
+    return 'kept';
+  }
+  const { status, data } = await api<{ message?: string }>(
+    infisical.host,
+    `/api/v1/workspace/${existing.id}`,
+    { method: 'DELETE', token },
+  );
+  if (status !== 200) {
+    throw new InfisicalError(
+      `Could not delete Infisical project "${existing.name}" (HTTP ${status}${data.message ? `: ${data.message}` : ''}). ` +
+        'The machine identity needs admin access to the project.',
+    );
+  }
+  return 'deleted';
+}
+
 /** Create/reuse the project, ensure every environment, seed placeholder secrets. */
 export async function bootstrapInfisical(answers: Answers): Promise<InfisicalBootstrapResult> {
   const { host, projectName, projectId } = answers.infisical;

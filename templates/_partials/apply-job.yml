@@ -28,6 +28,31 @@ __NEEDS_LINE__    environment: __GH_ENVIRONMENT__
       - name: Select workspace
         run: terraform workspace select -or-create __ENV_SLUG__
 
+      # First apply only: copy keel's placeholder page into this environment's
+      # own registry, so the container never runs from an external registry.
+      # No-ops as soon as the image is seeded or container_image points at the
+      # application's image.
+      - name: Seed the placeholder image
+        run: |
+          image=$(sed -n 's/^container_image *= *"\(.*\)"/\1/p' __ENV_SLUG__.tfvars)
+          if [ "$image" != "__PLACEHOLDER_IMAGE__" ]; then
+            echo "container_image is not keel's placeholder — nothing to seed."
+            exit 0
+          fi
+          docker login rg.${{ vars.SCW_REGION }}.scw.cloud -u nologin --password-stdin <<< "$SCW_SECRET_KEY"
+          if docker manifest inspect "$image" > /dev/null 2>&1; then
+            echo "Placeholder already in the registry — nothing to seed."
+            exit 0
+          fi
+          # The registry namespace must exist before the push; everything else
+          # (container included) is created by the full apply right after,
+          # once the image is pullable from the environment's own registry.
+          terraform apply -input=false -auto-approve -var-file=__ENV_SLUG__.tfvars \
+            -target=module.app_stack.scaleway_registry_namespace.this
+          docker pull __PLACEHOLDER_SOURCE_IMAGE__
+          docker tag __PLACEHOLDER_SOURCE_IMAGE__ "$image"
+          docker push "$image"
+
       - name: Terraform apply
         run: terraform apply -input=false -auto-approve -var-file=__ENV_SLUG__.tfvars
 

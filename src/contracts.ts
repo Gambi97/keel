@@ -51,15 +51,31 @@ export const BASIC_AUTH_SECRET_KEYS = ['BASIC_AUTH_USER', 'BASIC_AUTH_PASSWORD']
 export const BASIC_AUTH_FLAG = 'BASIC_AUTH_ENABLED';
 
 /**
- * Public image rendered as the default container_image in every generated
- * <env>.tfvars: the very first apply brings a keel-branded page up, so
- * APP_URL is real from day zero. Built and pushed by the Placeholder image
- * workflow from placeholder/ in this repo; it is also the reference
- * implementation of the env contract (PROJECT_NAME, APP_ENVIRONMENT,
- * BASIC_AUTH_*). Users replace it by editing container_image — or set ""
- * to skip the container entirely.
+ * keel's placeholder page: the very first apply brings a keel-branded page
+ * up, so APP_URL is real from day zero. Built and pushed to GHCR by the
+ * Placeholder image workflow from placeholder/ in this repo; it is also the
+ * reference implementation of the env contract (PROJECT_NAME,
+ * APP_ENVIRONMENT, BASIC_AUTH_*). Users replace it by editing
+ * container_image — or set "" to skip the container entirely.
+ *
+ * The container never runs from GHCR: the generated tfvars point at the
+ * environment's own Scaleway registry (placeholderImageRef), and the apply
+ * workflow's seed step copies the GHCR source there once, on the first
+ * apply. GHCR is a one-time source, not a runtime dependency. Bump the tag
+ * whenever placeholder/ changes what the image serves.
  */
-export const PLACEHOLDER_IMAGE = 'ghcr.io/gambi97/keel-placeholder:v1';
+export const PLACEHOLDER_IMAGE_NAME = 'keel-placeholder';
+export const PLACEHOLDER_IMAGE_TAG = 'v2';
+export const PLACEHOLDER_SOURCE_IMAGE = `ghcr.io/gambi97/${PLACEHOLDER_IMAGE_NAME}:${PLACEHOLDER_IMAGE_TAG}`;
+
+/**
+ * The placeholder as the environment's own registry sees it: rendered as the
+ * default container_image in <env>.tfvars, compared verbatim by the apply
+ * workflow's seed step to decide whether seeding is still needed.
+ */
+export function placeholderImageRef(projectName: string, region: string, envSlug: string): string {
+  return `rg.${region}.scw.cloud/${resourceName(projectName, envSlug)}/${PLACEHOLDER_IMAGE_NAME}:${PLACEHOLDER_IMAGE_TAG}`;
+}
 
 /**
  * Plain environment variables the generated app_stack injects into the
@@ -75,6 +91,20 @@ export const CONTAINER_ENV_KEYS = ['PROJECT_NAME', 'APP_ENVIRONMENT'] as const;
 export function resourceName(projectName: string, envSlug: string): string {
   return `${projectName}-${envSlug}`;
 }
+
+/**
+ * Name suffixes (after resourceName) of the per-environment resources the
+ * app_stack template creates. `keel teardown` deletes by these exact names,
+ * so a rename in the template without this table leaves orphans behind;
+ * contracts.test.ts pins both sides.
+ */
+export const ENV_RESOURCE_SUFFIXES = {
+  dbIamApplication: '-db',
+  dbIamPolicy: '-db-access',
+  storageIamApplication: '-storage',
+  storageIamPolicy: '-storage-access',
+  filesBucket: '-files',
+} as const;
 
 /**
  * Object Storage coordinates: seeded as placeholders by the CLI, produced by

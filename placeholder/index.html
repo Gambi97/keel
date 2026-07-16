@@ -107,11 +107,11 @@
       }
 
       .mark {
-        width: 88px;
-        height: 88px;
-        margin: 0 auto 1.6rem;
+        width: 230px;
+        height: auto;
+        margin: 0 auto 1.4rem;
         display: block;
-        filter: drop-shadow(0 0 22px rgba(231, 138, 106, 0.35));
+        filter: drop-shadow(0 0 26px rgba(236, 233, 226, 0.22));
       }
 
       .env {
@@ -208,28 +208,9 @@
     <div class="dots b"></div>
     <div class="dots c"></div>
     <main>
-      <!-- keel mark: a ship's keel — the spine laid first, ribs docking onto it -->
-      <svg class="mark" viewBox="0 0 96 96" fill="none" aria-hidden="true">
-        <defs>
-          <linearGradient id="k" x1="0" y1="0" x2="96" y2="96">
-            <stop offset="0" stop-color="#e78a6a" />
-            <stop offset="1" stop-color="#a78bfa" />
-          </linearGradient>
-        </defs>
-        <path
-          d="M48 8v62c0 10 8 18 26 18"
-          stroke="url(#k)"
-          stroke-width="6"
-          stroke-linecap="round"
-        />
-        <path
-          d="M30 24h36M26 40h44M22 56h52"
-          stroke="url(#k)"
-          stroke-width="4"
-          stroke-linecap="round"
-          opacity=".85"
-        />
-      </svg>
+      <!-- The real keel logo (assets/logo.png in the keel repo, made
+           transparent), shipped with the image and served by server.mjs. -->
+      <img class="mark" src="/logo.png" alt="keel" width="356" height="164" />
 
       <div class="env">{{ENVIRONMENT}} · online</div>
       <h1>{{PROJECT_NAME}}</h1>

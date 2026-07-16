@@ -10,6 +10,7 @@ import {
   normalizeEnvSlugs,
   parseEnvironments,
   stateBucketName,
+  validateContainerSize,
   validateProjectName,
   validateRegion,
   validateScale,
@@ -158,6 +159,17 @@ describe('validateScale', () => {
   });
 });
 
+describe('validateContainerSize', () => {
+  it('accepts the preset keys', () => {
+    expect(validateContainerSize('500m')).toBe('500m');
+    expect(validateContainerSize(' 100m ')).toBe('100m');
+  });
+
+  it('rejects unknown sizes with the supported list', () => {
+    expect(() => validateContainerSize('750m')).toThrow(/Supported sizes: 100m, 250m, 500m/);
+  });
+});
+
 describe('mergeAnswers', () => {
   it('later sources win', () => {
     const merged = mergeAnswers(
@@ -211,6 +223,14 @@ describe('finalizeAnswers', () => {
     expect(answers.infisical.host).toBe('https://app.infisical.com');
     expect(answers.basicAuth).toBe(true);
     expect(answers.objectStorage).toBe(false);
+    // The recommended container size, resolved to Scaleway units.
+    expect(answers.containerSize).toEqual({ cpuLimit: 500, memoryLimit: 1024 });
+  });
+
+  it('resolves a chosen container size preset', () => {
+    const partial = structuredClone(fullPartial) as PartialAnswers;
+    partial.containerSize = '1000m';
+    expect(finalizeAnswers(partial).containerSize).toEqual({ cpuLimit: 1000, memoryLimit: 2048 });
   });
 
   it('defaults to the staging+prod preset with sensible per-env rules', () => {

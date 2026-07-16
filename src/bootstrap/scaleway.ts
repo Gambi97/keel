@@ -1,7 +1,10 @@
 import {
   CreateBucketCommand,
+  DeleteBucketCommand,
+  DeleteObjectsCommand,
   GetBucketPolicyCommand,
   HeadBucketCommand,
+  ListObjectVersionsCommand,
   PutBucketPolicyCommand,
   PutBucketVersioningCommand,
   S3Client,
@@ -125,7 +128,7 @@ export async function retryWhileBucketPropagates<T>(
   }
 }
 
-function s3Client(answers: Answers): S3Client {
+function s3Client(answers: Pick<Answers, 'region' | 'scaleway'>): S3Client {
   return new S3Client({
     region: answers.region,
     endpoint: `https://s3.${answers.region}.scw.cloud`,
@@ -283,4 +286,194 @@ export async function ensureStateBucket(answers: Answers): Promise<StateBucketRe
   }
   const policyWarning = await lockDownStateBucket(client, bucket, answers);
   return policyWarning ? { created, policyWarning } : { created };
+}
+
+// --- Teardown ---------------------------------------------------------------
+// Deletes mirror the bootstrap/Terraform creations: find by exact name inside
+// the configured project/organization, delete if present. Every function is
+// idempotent — an absent resource is a valid outcome, not an error — so a
+// failed teardown can simply be re-run.
+
+export type DeleteOutcome = 'deleted' | 'absent';
+
+type TeardownCreds = Pick<Answers['scaleway'], 'secretKey' | 'projectId' | 'organizationId'>;
+
+async function scwJson<T>(secretKey: string, path: string): Promise<T> {
+  const response = await fetch(`${API_BASE}${path}`, { headers: { 'X-Auth-Token': secretKey } });
+  if (!response.ok) {
+    throw new ScalewayError(
+      `Scaleway API error on GET ${path.split('?')[0]}: HTTP ${response.status}.`,
+    );
+  }
+  return (await response.json()) as T;
+}
+
+async function scwDelete(secretKey: string, path: string): Promise<void> {
+  const status = await scwDeleteStatus(secretKey, path);
+  // 404 = already gone (e.g. a concurrent delete): the goal state is reached.
+  if (status >= 400 && status !== 404) {
+    throw new ScalewayError(`Scaleway API error on DELETE ${path}: HTTP ${status}.`);
+  }
+}
+
+/** DELETE returning the status: for callers with a fallback on refusal. */
+async function scwDeleteStatus(secretKey: string, path: string): Promise<number> {
+  const response = await fetch(`${API_BASE}${path}`, {
+    method: 'DELETE',
+    headers: { 'X-Auth-Token': secretKey },
+  });
+  return response.status;
+}
+
+/**
+ * The `name` query parameter of Scaleway list endpoints filters by substring,
+ * so "demo-staging" would also return "demo-staging-2": always re-match the
+ * exact name before deleting anything.
+ */
+async function deleteByExactName(
+  secretKey: string,
+  listPath: string,
+  collection: string,
+  name: string,
+  deletePath: (id: string) => string,
+): Promise<DeleteOutcome> {
+  const data = await scwJson<Record<string, { id: string; name: string }[] | undefined>>(
+    secretKey,
+    listPath,
+  );
+  const match = (data[collection] ?? []).find((item) => item.name === name);
+  if (!match) return 'absent';
+  await scwDelete(secretKey, deletePath(match.id));
+  return 'deleted';
+}
+
+/** Delete a Serverless Containers namespace (and the containers inside it). */
+export async function deleteContainerNamespace(
+  creds: TeardownCreds,
+  region: string,
+  name: string,
+): Promise<DeleteOutcome> {
+  const base = `/containers/v1beta1/regions/${region}/namespaces`;
+  return deleteByExactName(
+    creds.secretKey,
+    `${base}?project_id=${creds.projectId}&name=${encodeURIComponent(name)}&page_size=100`,
+    'namespaces',
+    name,
+    (id) => `${base}/${id}`,
+  );
+}
+
+/** Delete a Container Registry namespace (and the images inside it). */
+export async function deleteRegistryNamespace(
+  creds: TeardownCreds,
+  region: string,
+  name: string,
+): Promise<DeleteOutcome> {
+  const base = `/registry/v1/regions/${region}/namespaces`;
+  return deleteByExactName(
+    creds.secretKey,
+    `${base}?project_id=${creds.projectId}&name=${encodeURIComponent(name)}&page_size=100`,
+    'namespaces',
+    name,
+    (id) => `${base}/${id}`,
+  );
+}
+
+/** Delete a Serverless SQL database. */
+export async function deleteDatabase(
+  creds: TeardownCreds,
+  region: string,
+  name: string,
+): Promise<DeleteOutcome> {
+  const base = `/serverless-sqldb/v1alpha1/regions/${region}/databases`;
+  return deleteByExactName(
+    creds.secretKey,
+    `${base}?project_id=${creds.projectId}&name=${encodeURIComponent(name)}&page_size=100`,
+    'databases',
+    name,
+    (id) => `${base}/${id}`,
+  );
+}
+
+/** Delete an IAM policy by exact name. */
+export async function deleteIamPolicy(creds: TeardownCreds, name: string): Promise<DeleteOutcome> {
+  return deleteByExactName(
+    creds.secretKey,
+    `/iam/v1alpha1/policies?organization_id=${creds.organizationId}&policy_name=${encodeURIComponent(name)}&page_size=100`,
+    'policies',
+    name,
+    (id) => `/iam/v1alpha1/policies/${id}`,
+  );
+}
+
+/**
+ * Delete an IAM application by exact name. The direct delete is tried first;
+ * only when the API refuses it (typically: the application still owns API
+ * keys) are the keys deleted — filtered by `bearer_id`, the non-deprecated
+ * parameter (`application_id` answers HTTP 400 today) — and the delete
+ * retried once.
+ */
+export async function deleteIamApplication(
+  creds: TeardownCreds,
+  name: string,
+): Promise<DeleteOutcome> {
+  const { applications = [] } = await scwJson<{ applications?: { id: string; name: string }[] }>(
+    creds.secretKey,
+    `/iam/v1alpha1/applications?organization_id=${creds.organizationId}&name=${encodeURIComponent(name)}&page_size=100`,
+  );
+  const match = applications.find((app) => app.name === name);
+  if (!match) return 'absent';
+  const appPath = `/iam/v1alpha1/applications/${match.id}`;
+  const status = await scwDeleteStatus(creds.secretKey, appPath);
+  if (status < 400 || status === 404) return 'deleted';
+  const { api_keys = [] } = await scwJson<{ api_keys?: { access_key: string }[] }>(
+    creds.secretKey,
+    `/iam/v1alpha1/api-keys?bearer_id=${match.id}&page_size=100`,
+  );
+  for (const key of api_keys) {
+    await scwDelete(creds.secretKey, `/iam/v1alpha1/api-keys/${key.access_key}`);
+  }
+  await scwDelete(creds.secretKey, appPath);
+  return 'deleted';
+}
+
+/**
+ * Empty a bucket (every object version and delete marker — the state bucket
+ * is versioned) and delete it.
+ */
+export async function deleteBucket(
+  answers: Pick<Answers, 'region' | 'scaleway'>,
+  bucket: string,
+): Promise<DeleteOutcome> {
+  const client = s3Client(answers);
+  try {
+    let keyMarker: string | undefined;
+    let versionIdMarker: string | undefined;
+    do {
+      const page = await client.send(
+        new ListObjectVersionsCommand({
+          Bucket: bucket,
+          KeyMarker: keyMarker,
+          VersionIdMarker: versionIdMarker,
+        }),
+      );
+      const objects = [...(page.Versions ?? []), ...(page.DeleteMarkers ?? [])]
+        .filter((v) => v.Key)
+        .map((v) => ({ Key: v.Key!, ...(v.VersionId ? { VersionId: v.VersionId } : {}) }));
+      if (objects.length > 0) {
+        await client.send(
+          new DeleteObjectsCommand({ Bucket: bucket, Delete: { Objects: objects, Quiet: true } }),
+        );
+      }
+      keyMarker = page.IsTruncated ? page.NextKeyMarker : undefined;
+      versionIdMarker = page.IsTruncated ? page.NextVersionIdMarker : undefined;
+    } while (keyMarker || versionIdMarker);
+    await client.send(new DeleteBucketCommand({ Bucket: bucket }));
+    return 'deleted';
+  } catch (error) {
+    const name = (error as { name?: string }).name;
+    const status = (error as { $metadata?: { httpStatusCode?: number } }).$metadata?.httpStatusCode;
+    if (name === 'NoSuchBucket' || status === 404) return 'absent';
+    throw error;
+  }
 }

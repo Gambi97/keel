@@ -1,6 +1,7 @@
 import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 
@@ -12,8 +13,11 @@ import {
   CI_SECRET_NAMES,
   CI_VARIABLE_NAMES,
   CONTRACT_VERSION,
+  ENV_RESOURCE_SUFFIXES,
   INFISICAL_SECRETS_OUTPUT,
   INFISICAL_SECRETS_OUTPUT_PATTERN,
+  PLACEHOLDER_SOURCE_IMAGE,
+  placeholderImageRef,
   planStatusCheckContext,
   resourceName,
   S3_SECRET_KEYS,
@@ -92,6 +96,16 @@ describe('contracts between the bootstrap and the generated repository', () => {
     );
   });
 
+  it('teardown deletes by the exact names the app_stack creates', () => {
+    // keel teardown finds resources by name; a rename in the template without
+    // ENV_RESOURCE_SUFFIXES would silently leave orphans behind. Whitespace
+    // is fmt's business, not the contract's, so match names, not alignment.
+    const stack = read('modules/app_stack/main.tf');
+    for (const suffix of Object.values(ENV_RESOURCE_SUFFIXES)) {
+      expect(stack, suffix).toMatch(new RegExp(`name\\s+= "\\$\\{local\\.name\\}${suffix}"`));
+    }
+  });
+
   it('the committed manifest records the contract version', () => {
     const manifest = JSON.parse(read(MANIFEST_FILE)) as {
       contractVersion: number;
@@ -125,5 +139,38 @@ describe('contracts between the bootstrap and the generated repository', () => {
 
   it('the workspace/environment guard is rendered into main.tf', () => {
     expect(read('main.tf')).toContain('terraform.workspace == var.environment');
+  });
+
+  it('the placeholder build workflow publishes exactly the image the seed step pulls', () => {
+    // Every generated repo's first apply pulls PLACEHOLDER_SOURCE_IMAGE from
+    // GHCR; the workflow that builds and pushes it lives in this repo. The
+    // tag exists in both places — one test keeps them the same, so a bump on
+    // one side cannot ship a CLI that seeds an image nobody publishes.
+    const workflow = readFileSync(
+      fileURLToPath(new URL('../.github/workflows/placeholder.yml', import.meta.url)),
+      'utf8',
+    );
+    expect(workflow).toContain(PLACEHOLDER_SOURCE_IMAGE);
+  });
+
+  it('the tfvars placeholder image is exactly what the seed step looks for', () => {
+    // The seed step no-ops by comparing container_image against the ref it
+    // would seed: if the two renderings ever diverge, every apply re-runs the
+    // seeding (or worse, never seeds) — pin them to the same contract.
+    const apply = read('.github/workflows/terraform-apply.yml');
+    for (const env of ['staging', 'prod']) {
+      const ref = placeholderImageRef('demo-app', 'fr-par', env);
+      expect(read(`${env}.tfvars`)).toContain(`container_image = "${ref}"`);
+      expect(apply, env).toContain(`"$image" != "${ref}"`);
+    }
+    // The one-time source the seed step copies from.
+    expect(apply).toContain(`docker pull ${PLACEHOLDER_SOURCE_IMAGE}`);
+    // The -target that pre-creates the registry namespace must address the
+    // module instance main.tf actually declares.
+    expect(read('main.tf')).toContain('module "app_stack"');
+    expect(apply).toContain('-target=module.app_stack.scaleway_registry_namespace.this');
+    expect(read('modules/app_stack/main.tf')).toContain(
+      'resource "scaleway_registry_namespace" "this"',
+    );
   });
 });

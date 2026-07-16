@@ -69,6 +69,7 @@ import { GitHubError } from './bootstrap/github.js';
 function happyAnswer(message: string): unknown {
   if (message.includes('Project name')) return 'my-app';
   if (message.includes('environments')) return 'staging+prod';
+  if (message.includes('Container resources')) return '500m';
   if (message.includes('Object Storage')) return false;
   if (message.includes('Basic Auth')) return true;
   if (message.includes('production instances')) return '1';

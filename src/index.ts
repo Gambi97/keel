@@ -11,6 +11,7 @@ import {
   mergeAnswers,
   missingRequired,
   parseEnvironments,
+  validateContainerSize,
   type Answers,
   type PartialAnswers,
 } from './config.js';
@@ -18,6 +19,7 @@ import { CI_SECRET_NAMES, CI_VARIABLE_NAMES, resourceName } from './contracts.js
 import { generateProject, GenerateError, readManifest } from './generate.js';
 import { toolVersion } from './meta.js';
 import { confirmSummary, fillMissing } from './prompts.js';
+import { runTeardown } from './teardown.js';
 import {
   isDone,
   loadState,
@@ -69,6 +71,7 @@ const CLI_OPTIONS = {
   'no-basic-auth': { type: 'boolean' },
   'object-storage': { type: 'boolean' },
   'no-object-storage': { type: 'boolean' },
+  'container-size': { type: 'string' },
   'dev-min-scale': { type: 'string' },
   'dev-max-scale': { type: 'string' },
   'staging-min-scale': { type: 'string' },
@@ -131,6 +134,10 @@ const CLI_HELP: Record<keyof typeof CLI_OPTIONS, HelpEntry | null> = {
   'no-basic-auth': { text: 'Disable Basic Auth on non-production environments' },
   'object-storage': { text: 'Provision a per-environment Object Storage bucket' },
   'no-object-storage': { text: 'Do not provision Object Storage (default)' },
+  'container-size': {
+    hint: '<size>',
+    text: 'Per-instance resources: 100m | 250m | 500m | 1000m\n(mvCPU; default 500m = 500 mvCPU / 1024 MB)',
+  },
   'dev-min-scale': { hint: '<n>', text: 'Dev min instances (default 0)' },
   'dev-max-scale': { hint: '<n>', text: 'Dev max instances (default 1)' },
   'staging-min-scale': { hint: '<n>', text: 'Staging min instances (default 0)' },
@@ -152,7 +159,8 @@ function buildHelp(): string {
     'keel: generate and bootstrap serverless infra on Scaleway',
     '',
     'Usage:',
-    '  npx @gambi97/keel-cli [options]',
+    '  npx @gambi97/keel-cli [options]            create and bootstrap a project',
+    "  npx @gambi97/keel-cli teardown [options]   delete a project's Scaleway/Infisical resources",
     '',
     'Options:',
   ];
@@ -175,8 +183,16 @@ interface Flags {
   advanced: boolean;
 }
 
-function parseCli(argv: string[]): { partial: PartialAnswers; flags: Flags } {
-  const { values } = parseArgs({ args: argv, options: CLI_OPTIONS });
+function parseCli(argv: string[]): { partial: PartialAnswers; flags: Flags; command?: string } {
+  const { values, positionals } = parseArgs({
+    args: argv,
+    options: CLI_OPTIONS,
+    allowPositionals: true,
+  });
+  const command = positionals[0];
+  if (positionals.length > 1 || (command !== undefined && command !== 'teardown')) {
+    cancel(`Unknown command "${positionals.join(' ')}". The only command is "teardown".`);
+  }
 
   if (values.help) {
     process.stdout.write(buildHelp());
@@ -217,6 +233,9 @@ function parseCli(argv: string[]): { partial: PartialAnswers; flags: Flags } {
     environments: values.environments ? parseEnvironments(values.environments) : undefined,
     basicAuth: values['no-basic-auth'] ? false : values['basic-auth'],
     objectStorage: values['no-object-storage'] ? false : values['object-storage'],
+    containerSize: values['container-size']
+      ? validateContainerSize(values['container-size'])
+      : undefined,
     scaling: {
       dev: { minScale: num(values['dev-min-scale']), maxScale: num(values['dev-max-scale']) },
       staging: {
@@ -234,6 +253,7 @@ function parseCli(argv: string[]): { partial: PartialAnswers; flags: Flags } {
       dryRun: values['dry-run'] ?? false,
       advanced: values.advanced ?? false,
     },
+    ...(command !== undefined ? { command } : {}),
   };
 }
 
@@ -253,6 +273,7 @@ function normalizeConfigFile(raw: unknown): PartialAnswers {
     // `basicAuthStaging` is accepted as a legacy alias for `basicAuth`.
     basicAuth: (obj.basicAuth ?? obj.basicAuthStaging) as boolean | undefined,
     objectStorage: obj.objectStorage as boolean | undefined,
+    containerSize: obj.containerSize as string | undefined,
     environments,
     scaleway: (obj.scaleway ?? {}) as PartialAnswers['scaleway'],
     infisical: (obj.infisical ?? {}) as PartialAnswers['infisical'],
@@ -326,8 +347,10 @@ const BOOTSTRAP_STEPS: BootstrapStep[] = [
     label: () => 'Bootstrapping Infisical project and secrets',
     skipMessage: 'Infisical project: already done, skipping.',
     run: async (answers) => {
-      const { projectId } = await bootstrapInfisical(answers);
-      return { data: { projectId } };
+      const { projectId, createdProject } = await bootstrapInfisical(answers);
+      // Ownership is recorded for teardown: a project keel merely reused
+      // (an explicit --infisical-project-id) is not keel's to delete.
+      return { data: { projectId, createdProject: String(createdProject) } };
     },
   },
   {
@@ -411,7 +434,11 @@ async function runBootstrap(
 }
 
 async function main(): Promise<void> {
-  const { partial, flags } = parseCli(process.argv.slice(2));
+  const { partial, flags, command } = parseCli(process.argv.slice(2));
+
+  if (command === 'teardown') {
+    return runTeardown(partial, flags);
+  }
 
   intro(toolVersion());
   checkEnvironment();

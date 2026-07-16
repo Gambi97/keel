@@ -15,6 +15,8 @@ const page = readFileSync(new URL('./index.html', import.meta.url), 'utf8')
   .replaceAll('{{PROJECT_NAME}}', escapeHtml(process.env.PROJECT_NAME ?? 'your project'))
   .replaceAll('{{ENVIRONMENT}}', escapeHtml(process.env.APP_ENVIRONMENT ?? 'unknown'));
 
+const logo = readFileSync(new URL('./logo.png', import.meta.url));
+
 function escapeHtml(value) {
   return value.replace(/[&<>"']/g, (c) => `&#${c.charCodeAt(0)};`);
 }
@@ -44,6 +46,12 @@ function authorized(req) {
 createServer((req, res) => {
   if (req.url === '/healthz') {
     res.writeHead(200, { 'Content-Type': 'text/plain' }).end('ok');
+    return;
+  }
+  if (req.url === '/logo.png') {
+    res
+      .writeHead(200, { 'Content-Type': 'image/png', 'Cache-Control': 'public, max-age=86400' })
+      .end(logo);
     return;
   }
   if (!authorized(req)) {

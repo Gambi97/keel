@@ -13,6 +13,8 @@ import { InfisicalError, validateInfisical } from './bootstrap/infisical.js';
 import { ScalewayError, validateScalewayCredentials } from './bootstrap/scaleway.js';
 import {
   ConfigError,
+  CONTAINER_SIZES,
+  DEFAULT_CONTAINER_SIZE,
   DEFAULT_ENV_PRESET,
   DEFAULT_INFISICAL_HOST,
   DEFAULT_REGION,
@@ -118,7 +120,7 @@ export async function fillMissing(
   return out;
 }
 
-async function askProjectName(out: PartialAnswers): Promise<void> {
+export async function askProjectName(out: PartialAnswers): Promise<void> {
   if (out.projectName) return;
   out.projectName = await ask(
     p.text({
@@ -150,6 +152,20 @@ async function askConfiguration(out: PartialAnswers, options: FillOptions): Prom
   }
   const slugs = out.environments as EnvSlug[];
   const hasNonProd = slugs.some((s) => s !== 'prod');
+
+  if (out.containerSize === undefined) {
+    out.containerSize = await ask(
+      p.select({
+        message: 'Container resources per instance (idle scales to zero; per-env in <env>.tfvars)',
+        initialValue: DEFAULT_CONTAINER_SIZE,
+        options: Object.entries(CONTAINER_SIZES).map(([key, size]) => ({
+          value: key,
+          label: `${size.cpuLimit} mvCPU / ${size.memoryLimit} MB`,
+          hint: size.hint,
+        })),
+      }),
+    );
+  }
 
   if (out.objectStorage === undefined) {
     out.objectStorage = await ask(
@@ -343,33 +359,37 @@ async function askGitHub(out: PartialAnswers): Promise<void> {
   }
 }
 
+/** Host selector shared by the bootstrap block and the teardown credentials. */
+async function askInfisicalHost(out: PartialAnswers): Promise<void> {
+  if (out.infisical.host) return;
+  const choice = await ask(
+    p.select({
+      message: 'Infisical host',
+      initialValue: 'us',
+      options: [
+        { value: 'us', label: 'US — app.infisical.com', hint: 'default' },
+        { value: 'eu', label: 'EU — eu.infisical.com' },
+        { value: 'other', label: 'Other (self-hosted)' },
+      ],
+    }),
+  );
+  if (choice === 'us') out.infisical.host = DEFAULT_INFISICAL_HOST;
+  else if (choice === 'eu') out.infisical.host = 'https://eu.infisical.com';
+  else {
+    out.infisical.host = await ask(
+      p.text({
+        message: 'Infisical host URL',
+        placeholder: 'https://infisical.example.com',
+        validate: validate((v) => validateUrl(v, 'Infisical host')),
+      }),
+    );
+  }
+}
+
 /** Infisical block: host + machine identity, then verify login and project. */
 async function askInfisical(out: PartialAnswers): Promise<void> {
   p.intro('Infisical — secret-manager project and machine identity');
-  if (!out.infisical.host) {
-    const choice = await ask(
-      p.select({
-        message: 'Infisical host',
-        initialValue: 'us',
-        options: [
-          { value: 'us', label: 'US — app.infisical.com', hint: 'default' },
-          { value: 'eu', label: 'EU — eu.infisical.com' },
-          { value: 'other', label: 'Other (self-hosted)' },
-        ],
-      }),
-    );
-    if (choice === 'us') out.infisical.host = DEFAULT_INFISICAL_HOST;
-    else if (choice === 'eu') out.infisical.host = 'https://eu.infisical.com';
-    else {
-      out.infisical.host = await ask(
-        p.text({
-          message: 'Infisical host URL',
-          placeholder: 'https://infisical.example.com',
-          validate: validate((v) => validateUrl(v, 'Infisical host')),
-        }),
-      );
-    }
-  }
+  await askInfisicalHost(out);
 
   for (;;) {
     if (!out.infisical.clientId) {
@@ -479,4 +499,41 @@ async function askScaleway(out: PartialAnswers): Promise<void> {
 export async function confirmSummary(summary: string): Promise<boolean> {
   p.note(summary, 'About to create');
   return ask(p.confirm({ message: 'Proceed? No account is touched before this point.' }));
+}
+
+/**
+ * Ask only what teardown still misses: Scaleway and Infisical credentials —
+ * GitHub is never touched — plus the two coordinates that silently redirect
+ * the deletion when wrong: region and Infisical host. Looking in fr-par for a
+ * nl-ams project reports everything "absent" and looks like a clean teardown,
+ * so neither is ever defaulted silently here. Unlike the bootstrap blocks
+ * there is no read-only pre-validation — every delete call fails with a
+ * typed, named error anyway.
+ */
+export async function fillTeardownCredentials(partial: PartialAnswers): Promise<PartialAnswers> {
+  const out = structuredClone(partial);
+  await askRegion(out);
+  await askInfisicalHost(out);
+  if (!out.infisical.clientId) {
+    out.infisical.clientId = await text('Infisical machine identity client ID');
+  }
+  if (!out.infisical.clientSecret) {
+    out.infisical.clientSecret = await secret('Infisical machine identity client secret');
+  }
+  if (!out.scaleway.accessKey) out.scaleway.accessKey = await text('Scaleway access key');
+  if (!out.scaleway.secretKey) out.scaleway.secretKey = await secret('Scaleway secret key');
+  if (!out.scaleway.projectId) out.scaleway.projectId = await text('Scaleway project ID');
+  if (!out.scaleway.organizationId) {
+    out.scaleway.organizationId = await text('Scaleway organization ID');
+  }
+  return out;
+}
+
+/** Destructive confirmation: the user must type the project name back. */
+export async function confirmTeardown(summary: string, projectName: string): Promise<boolean> {
+  p.note(summary, 'About to DELETE');
+  const typed = await ask(
+    p.text({ message: `Type the project name ("${projectName}") to confirm deletion` }),
+  );
+  return typed.trim() === projectName;
 }
