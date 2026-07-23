@@ -51,9 +51,18 @@ can take anywhere.
 You need Node >= 18.17, git, and credentials for Scaleway, Infisical and
 GitHub (see [Prerequisites](#prerequisites) for how to get each one).
 
+keel generates **in place**, into the directory you run it in — so make an
+empty directory for the infrastructure repository and run keel there:
+
 ```sh
+mkdir my-app-infra && cd my-app-infra
 npx @gambi97/keel-cli
 ```
+
+The directory must be empty (an existing `git init` or a clone of the empty
+GitHub repository you want to use is fine — only `.git` is ignored). If it
+already has a GitHub `origin` remote, keel pushes to that repository and
+creates nothing; otherwise it creates one for you.
 
 The CLI asks for a project name, region and environments, then walks one
 provider at a time — GitHub, Infisical, Scaleway — verifying each set of
@@ -72,7 +81,7 @@ Non-interactive and dry-run:
 npx @gambi97/keel-cli --yes --name my-app --region fr-par --private
 
 # preview: generates the repo locally, touches no account
-npx @gambi97/keel-cli --dry-run --yes --name my-app
+npx @gambi97/keel-cli --dry-run --yes --name my-app --dir ./preview
 ```
 
 See the full [CLI reference](#cli-reference) for all flags, or pass
@@ -353,8 +362,9 @@ re-architecting.
 
 Every bootstrap step checks whether its resource already exists, and progress
 is recorded in `.keel.json` inside the project directory. If a run fails
-halfway, fix the cause and **re-run the same command**: completed steps are
-skipped, existing resources are reused, nothing is duplicated.
+halfway, fix the cause and **re-run the same command from the same directory**:
+completed steps are skipped, existing resources are reused, nothing is
+duplicated.
 
 ## Tearing it down
 
@@ -388,14 +398,18 @@ themselves and the local directory are never touched.
 No. The CLI bootstraps via APIs; Terraform runs inside GitHub Actions.
 
 **Can the repository be private?**
-Yes. The CLI asks for the name and the visibility; default is public (the
-infra holds no secrets), or choose private interactively or with `--private`.
+Yes. When keel creates the repository it asks for the name and the visibility;
+default is public (the infra holds no secrets), or choose private
+interactively or with `--private`. When you point keel at an existing
+repository (via its `origin` remote), it keeps that repository's visibility.
 
 **Can I point keel at an existing repository?**
-Only if it has no commits. keel pushes a brand-new history, so a repository
-that already has commits (even just a README from the GitHub UI) would reject
-the push; the CLI checks this up front and asks for another name. The easiest
-path is to let keel create the repository for you.
+Yes — that is the intended flow. Clone the empty GitHub repository you want to
+use (or set its `origin` remote) and run keel inside it: keel pushes there and
+creates nothing. It must have no commits, though — keel pushes a brand-new
+history, so a repository that already has commits (even just a README from the
+GitHub UI) would reject the push, and the CLI checks this up front. If the
+directory has no remote at all, keel creates the repository for you.
 
 **Can I reuse an existing Infisical project?**
 Yes: pass its project ID (`--infisical-project-id` or interactively). The CLI
@@ -447,7 +461,7 @@ npx @gambi97/keel-cli [options]            create and bootstrap a project
 npx @gambi97/keel-cli teardown [options]   delete a project's Scaleway/Infisical resources
 
 --name <name>                  Project name (dns-safe: lowercase, digits, hyphens)
---dir <path>                   Target directory (default: ./<name>)
+--dir <path>                   Target directory (default: the current directory)
 --region <region>              fr-par | nl-ams | pl-waw (default: fr-par)
 --scw-access-key <key>         or env SCW_ACCESS_KEY
 --scw-secret-key <key>         or env SCW_SECRET_KEY
@@ -460,7 +474,8 @@ npx @gambi97/keel-cli teardown [options]   delete a project's Scaleway/Infisical
                                (or env INFISICAL_PROJECT_ID; default: create by name)
 --infisical-project-name <n>   Infisical project name (default: project name)
 --github-token <token>         or env GITHUB_TOKEN / GH_TOKEN (scopes: repo, workflow)
---repo-name <name>             GitHub repository name (default: project name)
+--repo-name <name>             Repo to create when the directory has no git remote
+                               (default: <project>-infrastructure; ignored if origin is set)
 --private / --public           Repository visibility (default: public)
 --environments <preset>        prod | staging+prod | dev+staging+prod
                                (or a list like "dev,staging,prod"; default staging+prod)

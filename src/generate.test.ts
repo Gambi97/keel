@@ -109,7 +109,7 @@ describe('generateProject', () => {
     expect(manifest.options.objectStorage).toBe(false);
     // The repo identity is recorded so a resume locks it instead of re-running
     // the picker (which would frame the project's own repo as "create new").
-    expect(manifest.github.repoName).toBe('demo-app');
+    expect(manifest.github.repoName).toBe('demo-app-infrastructure');
     expect(manifest.github.repoPrivate).toBe(false);
     // The resume file is ignored, the manifest directory must not be:
     // check actual ignore rules, not comments.
@@ -152,6 +152,27 @@ describe('generateProject', () => {
     expect(() => generateProject(sampleAnswers(dir), { git: false })).toThrow(GenerateError);
   });
 
+  it('generates in place into an existing empty git repository', () => {
+    // keel runs inside a directory the user already `git init`ed: .git and the
+    // resume file are not content, so generation proceeds.
+    dir = mkdtempSync(join(tmpdir(), 'keel-inplace-'));
+    execSync('git init -b main', { cwd: dir });
+    writeFileSync(join(dir, '.keel.json'), '{}');
+    const written = generateProject(sampleAnswers(dir), { git: false });
+    expect(written).toContain('README.md');
+    expect(existsSync(join(dir, 'main.tf'))).toBe(true);
+  });
+
+  it('normalizes an adopted repo on master to main', () => {
+    // A directory `git init`ed on master (git's default on many installs) must
+    // end on main, or the push to `main` would fail after providers exist.
+    dir = mkdtempSync(join(tmpdir(), 'keel-master-'));
+    execSync('git init -b master', { cwd: dir });
+    generateProject(sampleAnswers(dir));
+    const branch = execSync('git rev-parse --abbrev-ref HEAD', { cwd: dir }).toString().trim();
+    expect(branch).toBe('main');
+  });
+
   it('reads back the manifest it wrote (resume source of truth)', () => {
     dir = mkdtempSync(join(tmpdir(), 'keel-manifest-'));
     const target = join(dir, 'demo-app');
@@ -161,7 +182,7 @@ describe('generateProject', () => {
     expect(manifest?.region).toBe('fr-par');
     expect(manifest?.environments).toEqual(['staging', 'prod']);
     expect(manifest?.options.basicAuth).toBe(true);
-    expect(manifest?.github?.repoName).toBe('demo-app');
+    expect(manifest?.github?.repoName).toBe('demo-app-infrastructure');
     expect(manifest?.github?.repoPrivate).toBe(false);
   });
 

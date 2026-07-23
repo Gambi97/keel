@@ -226,10 +226,15 @@ export function generateProject(answers: Answers, options: GenerateOptions = {})
   const tokens = tokenMap(answers);
   const target = answers.targetDir;
 
-  if (existsSync(target) && readdirSync(target).some((f) => f !== STATE_FILE)) {
+  // keel generates in place, into the directory it is run in. That directory
+  // may already be a git repository (a bare `git init`, or a clone of the empty
+  // repo the user created), so .git and keel's own resume file never count as
+  // content — anything else does, to avoid clobbering the user's files.
+  const ignored = new Set([STATE_FILE, '.git']);
+  if (existsSync(target) && readdirSync(target).some((f) => !ignored.has(f))) {
     throw new GenerateError(
-      `Directory "${target}" already exists and is not empty. ` +
-        'Pick a different name with --dir or remove it first.',
+      `Directory "${target}" is not empty. Run keel in an empty directory ` +
+        '(keel generates in place), or point --dir at one.',
     );
   }
   mkdirSync(target, { recursive: true });
@@ -305,4 +310,9 @@ function gitInit(target: string): void {
   const hasIdentity = spawnSync('git', ['config', 'user.email'], { cwd: target }).status === 0;
   const identity = hasIdentity ? [] : ['-c', 'user.name=keel', '-c', 'user.email=noreply@keel'];
   run(target, [...identity, 'commit', '-m', 'Initial infrastructure from keel']);
+  // The CI workflows and the push both assume `main`. A directory keel adopted
+  // may have been `git init`ed on `master` (still git's default on many
+  // installs), so normalize the branch now that a commit exists — otherwise the
+  // push to `main` would fail after the providers were already bootstrapped.
+  run(target, ['branch', '-M', 'main']);
 }

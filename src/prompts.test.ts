@@ -35,19 +35,22 @@ vi.mock('./state.js', () => ({
   loadState: () => ({ version: 1, projectName: 'x', steps: {} }),
 }));
 
-// Keep the real error classes; stub only the network-touching functions.
+// Keep the real error classes; stub only the network-touching functions and
+// the git-touching origin detection.
 const gh = vi.hoisted(() => ({
   inspectRepo: vi.fn(),
   createContext: vi.fn(),
   authenticate: vi.fn(),
-  listOwnedRepos: vi.fn(),
+  detectOrigin: vi.fn(),
+  getOriginUrl: vi.fn(),
 }));
 vi.mock('./bootstrap/github.js', async (orig) => ({
   ...(await orig<typeof import('./bootstrap/github.js')>()),
   createContext: gh.createContext,
   inspectRepo: gh.inspectRepo,
   authenticate: gh.authenticate,
-  listOwnedRepos: gh.listOwnedRepos,
+  detectOrigin: gh.detectOrigin,
+  getOriginUrl: gh.getOriginUrl,
 }));
 
 const inf = vi.hoisted(() => ({ validateInfisical: vi.fn() }));
@@ -73,7 +76,7 @@ function happyAnswer(message: string): unknown {
   if (message.includes('Object Storage')) return false;
   if (message.includes('Basic Auth')) return true;
   if (message.includes('production instances')) return '1';
-  if (message.includes('repository name')) return 'my-app';
+  if (message.includes('Repository name')) return 'my-app';
   if (message.includes('visibility')) return false;
   if (message.includes('GitHub token')) return 'ghp_token';
   if (message.includes('Infisical host')) return 'us';
@@ -97,7 +100,8 @@ beforeEach(() => {
   gh.createContext.mockResolvedValue({ owner: 'me', repo: 'my-app' });
   gh.inspectRepo.mockResolvedValue({ state: 'not-found' });
   gh.authenticate.mockResolvedValue({ octokit: {}, owner: 'me', ownerId: 1 });
-  gh.listOwnedRepos.mockResolvedValue([]); // no reusable repos → type a new name
+  gh.detectOrigin.mockReturnValue(undefined); // no git remote → keel creates the repo
+  gh.getOriginUrl.mockReturnValue(undefined); // ...and no raw origin URL either
   inf.validateInfisical.mockResolvedValue({});
   scw.validateScalewayCredentials.mockResolvedValue({});
 });
@@ -108,7 +112,7 @@ describe('fillMissing question order', () => {
 
     const idx = (needle: string) => asked.findIndex((m) => m.includes(needle));
     // Name first, then the three provider blocks in order.
-    expect(idx('Project name')).toBeLessThan(idx('repository name'));
+    expect(idx('Project name')).toBeLessThan(idx('Repository name'));
     expect(idx('GitHub token')).toBeLessThan(idx('Infisical host'));
     expect(idx('client secret')).toBeLessThan(idx('access key'));
     // Configuration (region, environments) comes after every provider block.
@@ -140,31 +144,32 @@ describe('fillMissing re-prompt loop', () => {
 
     await fillMissing(empty(), { advanced: false });
 
-    const repoAsks = asked.filter((m) => m.includes('repository name')).length;
+    const repoAsks = asked.filter((m) => m.includes('Repository name')).length;
     const tokenAsks = asked.filter((m) => m.includes('GitHub token')).length;
     expect(repoAsks).toBe(2); // asked again after the failure
     expect(tokenAsks).toBe(1); // token was fine, not re-asked
   });
 
-  it('picks an existing empty repo from the list without asking for a name', async () => {
-    gh.listOwnedRepos.mockResolvedValue([
-      { name: 'spare-repo', private: true, empty: true },
-      { name: 'has-code', private: false, empty: false },
-    ]);
-    answer = (message: string) => {
-      if (message === 'Repository') return 'spare-repo'; // pick from the selector
-      return happyAnswer(message);
-    };
+  it('adopts the origin repository without asking for a name or visibility', async () => {
+    gh.detectOrigin.mockReturnValue({ owner: 'me', repo: 'my-existing-repo' });
+    gh.createContext.mockResolvedValue({ owner: 'me', repo: 'my-existing-repo' });
+    gh.inspectRepo.mockResolvedValue({ state: 'empty' });
 
     const out = await fillMissing(empty(), { advanced: false });
 
-    // The selector was shown, and no "New repository name" text prompt appeared.
-    expect(asked).toContain('Repository');
-    expect(asked.some((m) => m.includes('New repository name'))).toBe(false);
-    expect(out.github.repoName).toBe('spare-repo');
-    // Reused repo keeps its own visibility, so the question is skipped.
-    expect(out.github.repoPrivate).toBe(true);
+    // The directory already has a remote, so keel adopts it: no repo questions.
+    expect(asked.some((m) => m.includes('Repository name'))).toBe(false);
     expect(asked.some((m) => m.includes('visibility'))).toBe(false);
+    expect(out.github.repoName).toBe('my-existing-repo');
+  });
+
+  it('bails when the directory has an origin keel cannot use', async () => {
+    // A non-GitHub (or SSH-alias) origin is ambiguous: keel must refuse before
+    // creating anything, never push code to one remote and configure another.
+    gh.getOriginUrl.mockReturnValue('git@gitlab.com:me/repo.git');
+    gh.detectOrigin.mockReturnValue(undefined);
+    await expect(fillMissing(empty(), { advanced: false })).rejects.toThrow();
+    expect(asked.some((m) => m.includes('GitHub token'))).toBe(false); // failed before asking
   });
 
   it('re-asks the token when GitHub rejects it', async () => {
@@ -176,7 +181,7 @@ describe('fillMissing re-prompt loop', () => {
 
     await fillMissing(empty(), { advanced: false });
 
-    const repoAsks = asked.filter((m) => m.includes('repository name')).length;
+    const repoAsks = asked.filter((m) => m.includes('Repository name')).length;
     const tokenAsks = asked.filter((m) => m.includes('GitHub token')).length;
     expect(tokenAsks).toBe(2); // token re-asked
     expect(repoAsks).toBe(1); // repo name kept

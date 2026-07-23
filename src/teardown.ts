@@ -179,11 +179,11 @@ export async function runTeardown(
   // The committed manifest (when the generated repo is still on disk) pins
   // the region, exactly like a resumed bootstrap; the local state file
   // recorded the Infisical project ID.
-  const targetDir = collected.targetDir?.trim() || collected.projectName!;
+  const targetDir = collected.targetDir?.trim() || process.cwd();
   const manifest = readManifest(targetDir);
   if (manifest && manifest.projectName === collected.projectName) {
     hydrateConfigFromManifest(collected, manifest);
-    log.info(`Found ./${targetDir} — the region is taken from its .keel manifest.`);
+    log.info(`Found a .keel manifest in ${targetDir} — the region is taken from it.`);
   }
   const state = loadState(targetDir, collected.projectName!);
   if (!collected.infisical.projectId) {
@@ -285,6 +285,6 @@ export async function runTeardown(
   rmSync(join(targetDir, STATE_FILE), { force: true });
   outro(
     `Teardown complete: ${deleted} deleted, ${absent} already absent.\n${REPO_KEPT_NOTE}\n` +
-      `The local directory ./${targetDir} was kept — remove it yourself if you are done with it.`,
+      `The generated files in ${targetDir} were kept — remove them yourself if you are done.`,
   );
 }

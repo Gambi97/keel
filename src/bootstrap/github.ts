@@ -36,10 +36,38 @@ export interface GitHubContext extends GitHubIdentity {
   repoPrivate: boolean;
 }
 
+/** The raw URL of a directory's `origin` remote, or undefined when it has none. */
+export function getOriginUrl(targetDir: string): string | undefined {
+  const result = spawnSync('git', ['remote', 'get-url', 'origin'], {
+    cwd: targetDir,
+    stdio: ['ignore', 'pipe', 'ignore'],
+  });
+  return result.status === 0 ? result.stdout.toString().trim() : undefined;
+}
+
+/**
+ * The GitHub repository a directory already points at, parsed from its `origin`
+ * remote. When keel runs inside a repository the user already created, this is
+ * the repository it pushes to and wires — keel creates nothing remote. Returns
+ * undefined when there is no origin, or when it is not a github.com URL keel
+ * can target (a non-GitHub remote, or an SSH host alias); the caller decides
+ * whether that means "create a repository" or "refuse". This is the single
+ * definition of an adoptable origin — pushRepo and createContext both use it,
+ * so code and CI configuration can never land on two different repositories.
+ */
+export function detectOrigin(targetDir: string): { owner: string; repo: string } | undefined {
+  const url = getOriginUrl(targetDir);
+  if (!url) return undefined;
+  // Accept both https://github.com/owner/repo(.git) and git@github.com:owner/repo(.git).
+  const match = url.match(/github\.com[:/]([^/]+)\/([^/]+?)(?:\.git)?$/);
+  if (!match) return undefined;
+  return { owner: match[1]!, repo: match[2]! };
+}
+
 /**
  * Authenticate the token and confirm it carries the scopes keel needs. Split
- * from createContext so the prompt can validate the token and list the user's
- * repositories before a repository name even exists.
+ * from createContext so the prompt can validate the token before a repository
+ * name even exists.
  */
 export async function authenticate(token: string): Promise<GitHubIdentity> {
   // Silence Octokit's own request logging: expected non-2xx responses (a 404
@@ -82,33 +110,24 @@ export async function authenticate(token: string): Promise<GitHubIdentity> {
   return { octokit, owner: login };
 }
 
+/**
+ * Resolve the target repository. When `targetDir` already has a GitHub `origin`
+ * remote, keel targets that repository (owner and name taken from the remote)
+ * and creates nothing; otherwise it targets `github.repoName` under the
+ * authenticated account, which `ensureRepo` will create.
+ */
 export async function createContext(
   github: Pick<Answers['github'], 'token' | 'repoName' | 'repoPrivate'>,
+  targetDir?: string,
 ): Promise<GitHubContext> {
   const identity = await authenticate(github.token);
-  return { ...identity, repo: github.repoName, repoPrivate: github.repoPrivate };
-}
-
-export interface OwnedRepo {
-  name: string;
-  private: boolean;
-  /** No content yet (GitHub reports size 0): keel can push into it. */
-  empty: boolean;
-}
-
-/**
- * Repositories the user owns, newest first, flagged by emptiness. keel pushes a
- * brand-new history, so only empty repos are reusable; `size === 0` is GitHub's
- * cheap proxy for "no commits" (inspectRepo makes the authoritative call once a
- * name is chosen). Paginated in full — the picker never silently truncates.
- */
-export async function listOwnedRepos(octokit: Octokit): Promise<OwnedRepo[]> {
-  const repos = await octokit.paginate(octokit.repos.listForAuthenticatedUser, {
-    affiliation: 'owner',
-    sort: 'updated',
-    per_page: 100,
-  });
-  return repos.map((r) => ({ name: r.name, private: r.private, empty: r.size === 0 }));
+  const origin = targetDir ? detectOrigin(targetDir) : undefined;
+  return {
+    octokit: identity.octokit,
+    owner: origin?.owner ?? identity.owner,
+    repo: origin?.repo ?? github.repoName,
+    repoPrivate: github.repoPrivate,
+  };
 }
 
 export type RepoState = 'not-found' | 'empty' | 'non-empty' | 'no-push';
@@ -149,8 +168,8 @@ export function assertRepoUsable(ctx: GitHubContext, state: RepoState): void {
   if (state === 'non-empty') {
     throw new GitHubError(
       `Repository ${ctx.owner}/${ctx.repo} already has commits. keel pushes a brand-new ` +
-        'history, so the push would be rejected: use a new repository name (keel creates ' +
-        'it for you) or an existing repository with no commits.',
+        'history, so the push would be rejected: point origin at an empty repository, or ' +
+        'run keel in a directory with no git remote and it will create one for you.',
       'repo',
     );
   }
@@ -192,10 +211,12 @@ export async function ensureRepo(ctx: GitHubContext): Promise<{ created: boolean
 /**
  * Push the generated repo over HTTPS. The token is handed to git through a
  * temporary GIT_ASKPASS helper reading an environment variable, so it never
- * appears in the remote URL, in .git/config or in the process list.
+ * appears in the remote URL, in .git/config or in the process list. When the
+ * directory already has an `origin` remote (the user's own repository), it is
+ * pushed to as-is and never rewritten; otherwise the origin is added from the
+ * resolved owner/repo.
  */
 export function pushRepo(ctx: GitHubContext, token: string, targetDir: string): void {
-  const remoteUrl = `https://github.com/${ctx.owner}/${ctx.repo}.git`;
   const askpassDir = mkdtempSync(join(tmpdir(), 'keel-askpass-'));
   const askpass = join(askpassDir, 'askpass.sh');
   writeFileSync(askpass, '#!/bin/sh\necho "$KEEL_GIT_TOKEN"\n');
@@ -212,10 +233,17 @@ export function pushRepo(ctx: GitHubContext, token: string, targetDir: string): 
           GIT_TERMINAL_PROMPT: '0',
         },
       });
-    git(['remote', 'remove', 'origin']);
-    const addRemote = git(['remote', 'add', 'origin', remoteUrl]);
-    if (addRemote.status !== 0) {
-      throw new GitHubError(`git remote add failed: ${addRemote.stderr.toString().trim()}`);
+    // Adopt an existing github.com origin as-is; otherwise keel owns the origin
+    // and points it at the repository it just created. The same detectOrigin
+    // used to resolve the context decides here, so the push target and the
+    // configured repository are always the same one (a foreign/unrecognized
+    // origin is rejected earlier, before anything is created).
+    if (!detectOrigin(targetDir)) {
+      const remoteUrl = `https://github.com/${ctx.owner}/${ctx.repo}.git`;
+      const addRemote = git(['remote', 'add', 'origin', remoteUrl]);
+      if (addRemote.status !== 0) {
+        throw new GitHubError(`git remote add failed: ${addRemote.stderr.toString().trim()}`);
+      }
     }
     // The remote embeds the username only; the password comes from askpass.
     const setUser = git(['config', 'credential.username', 'x-access-token']);

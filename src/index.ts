@@ -37,7 +37,9 @@ import {
   assertRepoUsable,
   configureRepo,
   createContext,
+  detectOrigin,
   ensureRepo,
+  getOriginUrl,
   inspectRepo,
   pushRepo,
   type GitHubContext,
@@ -96,7 +98,7 @@ interface HelpEntry {
 /** Help text per flag; null hides it (help/version share a closing line). */
 const CLI_HELP: Record<keyof typeof CLI_OPTIONS, HelpEntry | null> = {
   name: { hint: '<name>', text: 'Project name (dns-safe)' },
-  dir: { hint: '<path>', text: 'Target directory (default: ./<name>)' },
+  dir: { hint: '<path>', text: 'Target directory (default: the current directory)' },
   region: { hint: '<region>', text: 'fr-par | nl-ams | pl-waw (default: fr-par)' },
   'scw-access-key': { hint: '<key>', text: 'Scaleway access key        (env SCW_ACCESS_KEY)' },
   'scw-secret-key': { hint: '<key>', text: 'Scaleway secret key        (env SCW_SECRET_KEY)' },
@@ -123,7 +125,10 @@ const CLI_HELP: Record<keyof typeof CLI_OPTIONS, HelpEntry | null> = {
   },
   'infisical-project-name': { hint: '<n>', text: 'Infisical project name (default: project name)' },
   'github-token': { hint: '<token>', text: 'GitHub token, repo+workflow (env GITHUB_TOKEN)' },
-  'repo-name': { hint: '<name>', text: 'GitHub repository name (default: project name)' },
+  'repo-name': {
+    hint: '<name>',
+    text: 'Repo to create when the directory has no git remote\n(default: <project>-infrastructure; ignored if origin is set)',
+  },
   private: { text: 'Create the GitHub repository as private' },
   public: { text: 'Create the GitHub repository as public (default)' },
   environments: {
@@ -307,7 +312,7 @@ function printDryRunPlan(answers: Answers): void {
       }, environments ${envList},`,
       '    seed BASIC_AUTH_USER/BASIC_AUTH_PASSWORD (non-prod) and DATABASE_URL/APP_URL placeholders' +
         (answers.objectStorage ? ' and S3_* placeholders' : ''),
-      `  - GitHub: create ${answers.github.repoPrivate ? 'private' : 'public'} repo "${answers.github.repoName}", push, set ${CI_SECRET_NAMES.length} encrypted secrets,`,
+      `  - GitHub: create or reuse ${answers.github.repoPrivate ? 'private' : 'public'} repo "${answers.github.repoName}", push, set ${CI_SECRET_NAMES.length} encrypted secrets,`,
       `    ${CI_VARIABLE_NAMES.length} variables, ${ghEnvs} environments and main branch protection`,
     ].join('\n'),
   );
@@ -395,7 +400,7 @@ async function runBootstrap(
   if (options.preValidated) {
     // Interactive runs validated each provider inline while prompting; only
     // the GitHub context (octokit + owner) needs to be rebuilt here.
-    ctx = await createContext(answers.github);
+    ctx = await createContext(answers.github, answers.targetDir);
   } else {
     // All three credentials are checked before anything is created anywhere,
     // so a bad token cannot leave a half-bootstrapped account behind.
@@ -403,7 +408,7 @@ async function runBootstrap(
     await withSpinner('Validating Scaleway, Infisical and GitHub credentials', async () => {
       scalewayWarning = (await validateScalewayCredentials(answers.scaleway)).warning;
       await validateInfisical(answers.infisical);
-      ctx = await createContext(answers.github);
+      ctx = await createContext(answers.github, answers.targetDir);
       // A repo with commits would make the push fail after the bucket and the
       // Infisical project were already created: fail here instead. Skipped on
       // resume, where the previous run's push is the reason it is non-empty.
@@ -452,8 +457,8 @@ async function main(): Promise<void> {
     // so flags/defaults can't silently diverge from the generated repo (e.g. a
     // resume without --object-storage must not flip it off). Same source of
     // truth as the interactive path.
-    const resumeDir = partial.targetDir?.trim() || partial.projectName;
-    const manifest = resumeDir ? readManifest(resumeDir) : undefined;
+    const resumeDir = partial.targetDir?.trim() || process.cwd();
+    const manifest = readManifest(resumeDir);
     if (manifest && manifest.projectName === partial.projectName) {
       hydrateConfigFromManifest(partial, manifest);
       log.info(`Resuming "${manifest.projectName}" — configuration locked to its .keel manifest.`);
@@ -484,6 +489,28 @@ async function main(): Promise<void> {
     if (!collected.projectName) collected.projectName = 'my-app';
   }
 
+  // keel generates in place. Resolve the repository from the directory's origin
+  // once, for every code path: adopt a github.com origin (recording its real
+  // name so the manifest and summary match what is actually pushed), and refuse
+  // a remote keel cannot target rather than create a repo and push the code
+  // somewhere else. Skipped in a dry run, which touches no remote.
+  if (!flags.dryRun) {
+    const targetDir = collected.targetDir?.trim() || process.cwd();
+    const origin = detectOrigin(targetDir);
+    if (origin) {
+      collected.github.repoName = origin.repo;
+    } else {
+      const originUrl = getOriginUrl(targetDir);
+      if (originUrl) {
+        cancel(
+          `This directory's "origin" remote (${originUrl}) is not a github.com URL keel ` +
+            'can use, so keel cannot tell where to push. Remove it, or point it at the ' +
+            'GitHub repository keel should use (https://github.com/<owner>/<repo>.git).',
+        );
+      }
+    }
+  }
+
   const answers = finalizeAnswers(collected);
 
   const summary = renderSummary(answers, flags.dryRun);
@@ -497,7 +524,8 @@ async function main(): Promise<void> {
   const state = loadState(answers.targetDir, answers.projectName);
 
   if (!isDone(state, 'generate')) {
-    await withSpinner(`Generating repository in ./${answers.targetDir}`, async () => {
+    const where = answers.targetDir === process.cwd() ? 'the current directory' : answers.targetDir;
+    await withSpinner(`Generating repository in ${where}`, async () => {
       generateProject(answers);
     });
     markDone(answers.targetDir, state, 'generate');

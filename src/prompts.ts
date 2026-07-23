@@ -3,11 +3,11 @@ import * as p from '@clack/prompts';
 import {
   authenticate,
   createContext,
-  type GitHubIdentity,
+  detectOrigin,
+  getOriginUrl,
   GitHubError,
   inspectRepo,
   assertRepoUsable,
-  listOwnedRepos,
 } from './bootstrap/github.js';
 import { InfisicalError, validateInfisical } from './bootstrap/infisical.js';
 import { ScalewayError, validateScalewayCredentials } from './bootstrap/scaleway.js';
@@ -21,10 +21,12 @@ import {
   ENV_PRESETS,
   envDefaultScale,
   hydrateConfigFromManifest,
+  infraRepoName,
   type EnvSlug,
   REGIONS,
   type PartialAnswers,
   validateProjectName,
+  validateRepoName,
   validateScale,
   validateUrl,
 } from './config.js';
@@ -92,7 +94,7 @@ export async function fillMissing(
   // already generated with it), so lock it from the committed manifest instead
   // of asking again. Credentials are never persisted, so the provider blocks
   // still run — set SCW_*/INFISICAL_*/GITHUB_TOKEN in the env to skip typing.
-  const resumeDir = out.targetDir?.trim() || out.projectName!;
+  const resumeDir = out.targetDir?.trim() || process.cwd();
   const manifest = readManifest(resumeDir);
   const resuming = manifest !== undefined && manifest.projectName === out.projectName;
   if (manifest && resuming) {
@@ -222,83 +224,37 @@ async function askConfiguration(out: PartialAnswers, options: FillOptions): Prom
 }
 
 /**
- * Decide the target repository once the token is known: create a new one, or
- * reuse an existing empty repo picked from a list. keel pushes a brand-new
- * history, so only empty repos are offered — a name typed for a new repo is
- * still validated. Sets repoName (and, for an existing pick, its real
- * visibility) on `out`.
+ * GitHub block: token first, then the target repository.
+ *
+ * keel runs inside the current directory. When that directory already has a
+ * GitHub `origin` remote, that IS the target repository — keel pushes to it and
+ * creates nothing, so neither a name nor a visibility is asked. Otherwise keel
+ * will create a repository for you, and asks only for its name and visibility.
  */
-async function chooseRepo(out: PartialAnswers, identity: GitHubIdentity): Promise<void> {
-  const CREATE_NEW = ' create-new'; // sentinel: a leading space is never a valid repo name
-  const spin = p.spinner();
-  spin.start('Fetching your GitHub repositories');
-  let reusable: Awaited<ReturnType<typeof listOwnedRepos>> = [];
-  try {
-    const repos = await listOwnedRepos(identity.octokit);
-    reusable = repos.filter((r) => r.empty);
-    spin.stop(
-      reusable.length
-        ? `Found ${reusable.length} empty repositor${reusable.length === 1 ? 'y' : 'ies'} you can reuse`
-        : 'No empty repositories to reuse — keel will create a new one',
-    );
-  } catch {
-    spin.stop('Could not list repositories; you can still name a new one');
-  }
-
-  const choice = reusable.length
-    ? await ask(
-        p.select({
-          message: 'Repository',
-          initialValue: CREATE_NEW,
-          options: [
-            {
-              value: CREATE_NEW,
-              label: 'Create a new repository',
-              hint: 'keel creates it for you',
-            },
-            ...reusable.map((r) => ({
-              value: r.name,
-              label: r.name,
-              hint: `${r.private ? 'private' : 'public'}, empty — reuse it`,
-            })),
-          ],
-        }),
-      )
-    : CREATE_NEW;
-
-  if (choice !== CREATE_NEW) {
-    const picked = reusable.find((r) => r.name === choice)!;
-    out.github.repoName = picked.name;
-    out.github.repoPrivate = picked.private; // keep the repo's existing visibility
-    return;
-  }
-
-  out.github.repoName = await ask(
-    p.text({
-      message: 'New repository name',
-      initialValue: out.projectName,
-      validate: validate(validateProjectName),
-    }),
-  );
-}
-
-/** GitHub block: token first (so we can list repos), then repo choice and state. */
 async function askGitHub(out: PartialAnswers): Promise<void> {
+  const targetDir = out.targetDir?.trim() || process.cwd();
   // When resuming a run that already pushed, the repo legitimately has
   // commits: a non-empty repo must not block the resume.
-  const targetDir = out.targetDir?.trim() || out.projectName!;
   const alreadyPushed = isDone(loadState(targetDir, out.projectName!), 'github-push');
+  const origin = detectOrigin(targetDir);
+  // An origin keel cannot target (non-GitHub, or an SSH host alias) is
+  // ambiguous: fail fast, before asking for anything, instead of creating a
+  // repository and pushing the code to a different remote.
+  if (!origin && getOriginUrl(targetDir)) {
+    log.error(
+      `This directory's "origin" remote is not a github.com URL keel can use. Remove it, ` +
+        'or point it at the GitHub repository keel should use, then run keel again.',
+    );
+    bail();
+  }
 
-  p.intro('GitHub — token, repository and visibility');
+  p.intro('GitHub — token and repository');
   for (;;) {
-    // Token first: authenticating up front lets keel list your repositories so
-    // you can pick one instead of typing its name.
     if (!out.github.token) {
       out.github.token = await secret('GitHub token (scopes: repo, workflow)');
     }
-    let identity: GitHubIdentity;
     try {
-      identity = await authenticate(out.github.token!);
+      await authenticate(out.github.token!);
     } catch (error) {
       if (!(error instanceof GitHubError)) throw error;
       log.error(error.message);
@@ -306,50 +262,71 @@ async function askGitHub(out: PartialAnswers): Promise<void> {
       continue;
     }
 
-    // New-or-existing selector. Skipped when a name is already fixed by flags,
-    // --config or a resumed run.
-    if (!out.github.repoName) {
-      await chooseRepo(out, identity);
-    }
-
-    // Visibility. An existing pick carries its own; only a new repo asks.
-    if (out.github.repoPrivate === undefined) {
-      out.github.repoPrivate = await ask(
-        p.select({
-          message: 'Repository visibility',
-          initialValue: false,
-          options: [
-            { value: false, label: 'Public', hint: 'the infra contains no secrets' },
-            { value: true, label: 'Private' },
-          ],
-        }),
-      );
+    if (origin) {
+      // The user already created the repository: keel adopts it as-is.
+      out.github.repoName = origin.repo;
+      if (out.github.repoPrivate === undefined) out.github.repoPrivate = false;
+    } else {
+      // keel will create the repository — ask its name and visibility unless
+      // fixed by flags/--config/a resumed run.
+      if (!out.github.repoName) {
+        out.github.repoName = await ask(
+          p.text({
+            message: 'Repository name (keel will create it)',
+            initialValue: out.projectName ? infraRepoName(out.projectName) : undefined,
+            validate: validate(validateRepoName),
+          }),
+        );
+      }
+      if (out.github.repoPrivate === undefined) {
+        out.github.repoPrivate = await ask(
+          p.select({
+            message: 'Repository visibility',
+            initialValue: false,
+            options: [
+              { value: false, label: 'Public', hint: 'the infra contains no secrets' },
+              { value: true, label: 'Private' },
+            ],
+          }),
+        );
+      }
     }
 
     try {
-      const ctx = await createContext({
-        token: out.github.token!,
-        repoName: out.github.repoName!,
-        repoPrivate: out.github.repoPrivate ?? false,
-      });
+      const ctx = await createContext(
+        {
+          token: out.github.token!,
+          repoName: out.github.repoName!,
+          repoPrivate: out.github.repoPrivate ?? false,
+        },
+        targetDir,
+      );
       const { state } = await inspectRepo(ctx);
       if (!(state === 'non-empty' && alreadyPushed)) {
         assertRepoUsable(ctx, state);
       }
-      const repo = `${ctx.owner}/${out.github.repoName}`;
+      const repo = `${ctx.owner}/${ctx.repo}`;
       p.outro(
         state === 'not-found'
           ? `GitHub connected — ${repo} will be created after confirmation.`
           : state === 'non-empty'
             ? `GitHub connected — resuming, ${repo} was already pushed.`
-            : `GitHub connected — existing empty repository ${repo} will be reused.`,
+            : origin
+              ? `GitHub connected — will push to your existing repository ${repo}.`
+              : `GitHub connected — existing empty repository ${repo} will be reused.`,
       );
       return;
     } catch (error) {
       if (!(error instanceof GitHubError)) throw error;
       log.error(error.message);
-      if (error.field === 'repo') {
-        // Bad repo choice: re-run the selector and re-derive its visibility.
+      if (origin) {
+        // The target repository is fixed by the directory's origin remote, so a
+        // repo-level problem (commits already present, no push access) is not
+        // something a re-prompt can fix — only a bad token is worth re-asking.
+        if (error.field === 'repo') bail();
+        out.github.token = undefined;
+      } else if (error.field === 'repo') {
+        // Bad repo choice: re-ask the name and re-derive its visibility.
         out.github.repoName = undefined;
         out.github.repoPrivate = undefined;
       } else {

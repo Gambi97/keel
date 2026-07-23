@@ -171,11 +171,11 @@ export interface KeelManifest {
  * steps never read them.
  *
  * The GitHub repo identity is locked too: on resume the target repository is
- * already decided (keel created and pushed it), so the picker must not run and
- * must never frame the project's own — now non-empty — repo as "create a new
- * one". Older manifests without a github block fall back to the project name,
- * which is the repo default and the only repository the project could own. An
- * explicit --repo-name still wins (the established flag-precedence rule).
+ * already decided (keel created and pushed it), so it must never be re-asked or
+ * re-derived as a fresh "create a new one". Older manifests without a github
+ * block fall back to the project name, which is the repo default and the only
+ * repository the project could own. An explicit --repo-name still wins (the
+ * established flag-precedence rule).
  */
 export function hydrateConfigFromManifest(partial: PartialAnswers, manifest: KeelManifest): void {
   partial.region = manifest.region;
@@ -217,6 +217,36 @@ export function validateProjectName(name: string): string {
     throw new ConfigError(
       `Invalid project name "${trimmed}": use 1-50 lowercase letters, digits or single hyphens, ` +
         'starting with a letter and not ending with a hyphen (DNS-safe).',
+    );
+  }
+  return trimmed;
+}
+
+/**
+ * Default GitHub repo name for a project's infrastructure: `<project>-infrastructure`.
+ * keel owns the infra repo; the application lives in a repo named after the project
+ * itself, so the suffix keeps the two from colliding. Falls back to the bare name if
+ * the suffix would break the 50-char DNS-safe limit `validateProjectName` enforces.
+ */
+export function infraRepoName(projectName: string): string {
+  const suffixed = `${projectName}-infrastructure`;
+  return suffixed.length <= 50 ? suffixed : projectName;
+}
+
+const REPO_NAME_RE = /^[A-Za-z0-9._-]+$/;
+
+/**
+ * Validate a GitHub repository name. Deliberately laxer than a project name:
+ * repo names feed no DNS-sensitive resource (those derive from the project
+ * name), and keel may adopt a repository the user already created — whose name
+ * GitHub allows to contain uppercase, dots and underscores, up to 100 chars.
+ */
+export function validateRepoName(name: string): string {
+  const trimmed = name.trim();
+  if (!REPO_NAME_RE.test(trimmed) || trimmed.length > 100 || trimmed === '.' || trimmed === '..') {
+    throw new ConfigError(
+      `Invalid repository name "${trimmed}": use 1-100 letters, digits, ` +
+        "'.', '-' or '_' (GitHub's rules).",
     );
   }
   return trimmed;
@@ -396,13 +426,13 @@ export function finalizeAnswers(partial: PartialAnswers): Answers {
   return {
     projectName,
     region: validateRegion(partial.region ?? DEFAULT_REGION),
-    targetDir: partial.targetDir?.trim() || projectName,
+    targetDir: partial.targetDir?.trim() || process.cwd(),
     stateBucket: stateBucketName(projectName),
     scaleway: finalizeScaleway(partial),
     infisical: finalizeInfisical(partial, projectName),
     github: {
       token: requireString(partial.github.token, 'GitHub token'),
-      repoName: validateProjectName(partial.github.repoName?.trim() || projectName),
+      repoName: validateRepoName(partial.github.repoName?.trim() || infraRepoName(projectName)),
       repoPrivate: partial.github.repoPrivate ?? false,
     },
     basicAuth,
@@ -453,7 +483,7 @@ export function finalizeTeardownAnswers(partial: PartialAnswers): TeardownConfig
   return {
     projectName,
     region: validateRegion(partial.region ?? DEFAULT_REGION),
-    targetDir: partial.targetDir?.trim() || projectName,
+    targetDir: partial.targetDir?.trim() || process.cwd(),
     stateBucket: stateBucketName(projectName),
     scaleway: finalizeScaleway(partial),
     infisical: finalizeInfisical(partial, projectName),

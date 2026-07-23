@@ -38,9 +38,10 @@ export async function withSpinner<T>(label: string, fn: () => Promise<T>): Promi
 
 export function renderSummary(answers: Answers, dryRun: boolean): string {
   const envSlugs = answers.environments.map((e) => e.slug).join(', ');
+  const directory = answers.targetDir === process.cwd() ? 'current directory' : answers.targetDir;
   const lines = [
     `Project          ${answers.projectName}`,
-    `Directory        ./${answers.targetDir}`,
+    `Directory        ${directory}`,
     `Region           ${answers.region}`,
     '',
     'Scaleway',
@@ -49,7 +50,7 @@ export function renderSummary(answers: Answers, dryRun: boolean): string {
     `  state bucket   ${answers.stateBucket} (will be created)`,
     '',
     'GitHub',
-    `  repository     ${answers.github.repoName} (${answers.github.repoPrivate ? 'private' : 'public'}, will be created + pushed)`,
+    `  repository     ${answers.github.repoName} (${answers.github.repoPrivate ? 'private' : 'public'}, created or reused, then pushed)`,
     `  secrets        SCW_*, INFISICAL_* (encrypted)`,
     `  variables      TF_STATE_BUCKET, SCW_REGION, INFISICAL_PROJECT_ID, INFISICAL_HOST`,
     '',

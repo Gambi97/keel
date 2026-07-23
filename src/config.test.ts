@@ -12,6 +12,7 @@ import {
   stateBucketName,
   validateContainerSize,
   validateProjectName,
+  validateRepoName,
   validateRegion,
   validateScale,
   type PartialAnswers,
@@ -41,6 +42,22 @@ describe('validateProjectName', () => {
   it('rejects invalid names', () => {
     for (const bad of ['My-App', '-app', 'app-', '2app', 'a'.repeat(51), 'a--b', 'app_name', '']) {
       expect(() => validateProjectName(bad), bad).toThrow(ConfigError);
+    }
+  });
+});
+
+describe('validateRepoName', () => {
+  it('accepts GitHub-legal names a project name would reject', () => {
+    // keel adopts a repository the user may already have named freely; repo
+    // names feed no DNS-sensitive resource, so the rules follow GitHub, not DNS.
+    for (const ok of ['My_Repo', 'keel.infra', 'a'.repeat(100), 'App-2']) {
+      expect(validateRepoName(ok), ok).toBe(ok);
+    }
+  });
+
+  it('rejects names GitHub itself would reject', () => {
+    for (const bad of ['has space', 'a/b', '..', '.', 'a'.repeat(101), '']) {
+      expect(() => validateRepoName(bad), bad).toThrow(ConfigError);
     }
   });
 });
@@ -217,8 +234,9 @@ describe('finalizeAnswers', () => {
   it('produces defaults and derived values', () => {
     const answers = finalizeAnswers(structuredClone(fullPartial));
     expect(answers.stateBucket).toBe('my-app-tfstate');
-    expect(answers.targetDir).toBe('my-app');
-    expect(answers.github.repoName).toBe('my-app');
+    // keel generates in place: the target defaults to the current directory.
+    expect(answers.targetDir).toBe(process.cwd());
+    expect(answers.github.repoName).toBe('my-app-infrastructure');
     expect(answers.github.repoPrivate).toBe(false);
     expect(answers.infisical.host).toBe('https://app.infisical.com');
     expect(answers.basicAuth).toBe(true);
@@ -231,6 +249,14 @@ describe('finalizeAnswers', () => {
     const partial = structuredClone(fullPartial) as PartialAnswers;
     partial.containerSize = '1000m';
     expect(finalizeAnswers(partial).containerSize).toEqual({ cpuLimit: 1000, memoryLimit: 2048 });
+  });
+
+  it('accepts an adopted repo name that is not DNS-safe', () => {
+    // When keel is pointed at an existing origin, its repo name (e.g. one with
+    // an underscore or uppercase) must not be rejected as if it were a project.
+    const partial = structuredClone(fullPartial) as PartialAnswers;
+    partial.github.repoName = 'My_Infra.Repo';
+    expect(finalizeAnswers(partial).github.repoName).toBe('My_Infra.Repo');
   });
 
   it('defaults to the staging+prod preset with sensible per-env rules', () => {
