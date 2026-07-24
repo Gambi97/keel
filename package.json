@@ -41,7 +41,7 @@
     "test": "vitest run",
     "verify:templates": "node scripts/verify-templates.mjs",
     "prepare": "npm run build",
-    "prepublishOnly": "npm run lint && npm run test"
+    "prepublishOnly": "npm run lint && npm run test && npm run verify:templates"
   },
   "dependencies": {
     "@aws-sdk/client-s3": "^3.600.0",
