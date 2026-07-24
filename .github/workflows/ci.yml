@@ -44,6 +44,7 @@ jobs:
 
       - name: Dry-run end-to-end
         run: |
+          # keel generates in place, into the (empty) current directory.
           mkdir -p /tmp/keel-dry && cd /tmp/keel-dry
           node $GITHUB_WORKSPACE/dist/index.js --dry-run --yes --name ci-demo
-          test -f ci-demo/main.tf
+          test -f main.tf
